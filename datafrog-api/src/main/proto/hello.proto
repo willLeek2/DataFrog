@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+
+package world.willfrog.datafrog.idl;
+
+// 骨架示例服务，用来验证 DataFrog 对外 RPC 链路（契约生成、Dubbo 注册、容器化部署）端到端可用。
+// 首批真实数据服务接入后，由 frog 决定本服务去留。
+service HelloService {
+  rpc SayHello(HelloRequest) returns (HelloReply);
+}
+
+message HelloRequest {
+  // 留空时返回固定的 "Hello World"；填写时把名字接在后面，用于演示请求参数处理。
+  string name = 1;
+}
+
+message HelloReply {
+  string message = 1;
+}
