@@ -49,6 +49,14 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.13.0</version>
             </plugin>
+            <!-- 钉 Surefire 版本：Maven 3.6 系的默认 Surefire 2.12.4 走 JUnit 3 提供器，
+                 会静默跳过 JUnit 5 测试（BUILD SUCCESS 但 Tests run: 0）。钉 3.5.2 后
+                 任何 Maven 版本下测试都真实执行。 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
+            </plugin>
         </plugins>
     </build>
 </project>
