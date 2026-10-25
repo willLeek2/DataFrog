@@ -10,11 +10,11 @@ DataFrog 是 AlphaFrog 的数据平台，一个独立仓库的单体 Spring 应�
 
 `datafrog-server` 是单体应用模块，DataFrog 的全部 Dubbo 提供方都跑在这一个进程里。它依赖 `datafrog-api`，实现契约接口并以 `@DubboService` 暴露。
 
-把契约拆成独立模块是沿用 alphafrog 的既有形态。alphafrog 的每个微服务都由一个 Api 契约模块和一个 Service 实现模块组成，DataFrog 保持同构，调试与构建工具链不需要为本服务发明新路径。
+把契约拆成独立模块是沿用 alphafrog 的既有形态。alphafrog 的每个微服务都由一个 Api 契约模块和一个 Service 实现模块组成，DataFrog 沿用同样的模块划分，调试与构建工具链不需要为本服务发明新路径。
 
 ## 构建
 
-本机执行 Maven 前必须钉 JDK 17：
+本机执行 Maven 前必须把 JDK 固定为 17：
 
 ```bash
 export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.0.1.jdk/Contents/Home

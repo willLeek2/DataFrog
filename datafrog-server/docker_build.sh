@@ -1,6 +1,6 @@
 # DataFrog 单体应用镜像构建脚本。在仓库根目录执行：bash datafrog-server/docker_build.sh [IMAGE_TAG]
 # 自包含两步：先 ./mvnw 构建 jar（Dockerfile 拷的是预构建产物），再 docker build。
-# 机器上无需安装特定版本 Maven，Wrapper 会下载钉住的 Maven；JDK 需要 17（JAVA_HOME 或 PATH）。
+# 机器上无需安装特定版本 Maven，Wrapper 会自动下载固定版本的 Maven；JDK 需要 17（JAVA_HOME 或 PATH）。
 set -e
 
 USE_PROXY=${USE_PROXY:-1}
