@@ -66,12 +66,12 @@ public final class AcceptanceClient {
 
     /**
      * create &lt;host&gt; &lt;port&gt; &lt;targetObjectName&gt; &lt;clientRequestId&gt; &lt;instruction&gt;
-     * &lt;timeoutSeconds&gt; [outputFormat] [sessionToken]
+     * &lt;timeoutSeconds&gt; [outputFormat] [sessionToken] [model]
      */
     private static int runCreate(String[] args) throws Exception {
-        // args[0]="create"，其后 6 个必填 + 2 个可选
-        if (args.length < 7 || args.length > 9) {
-            System.err.println("create: expected 6 required and up to 2 optional args, got " + (args.length - 1));
+        // args[0]="create"，其后 6 个必填 + 3 个可选
+        if (args.length < 7 || args.length > 10) {
+            System.err.println("create: expected 6 required and up to 3 optional args, got " + (args.length - 1));
             usage();
             return 1;
         }
@@ -84,10 +84,13 @@ public final class AcceptanceClient {
         boolean omitTimeout = "omit".equals(args[6]);
         long timeoutSeconds = omitTimeout ? 0 : parseTimeout(args[6]);
         String outputFormat = args.length >= 8 ? args[7] : null;
-        String sessionToken = args.length >= 9 ? args[8] : DEFAULT_SESSION_TOKEN;
+        // 可选位传空串时按缺省处理，方便脚本在只想传尾部 model 时用 "" 占位
+        String sessionToken = args.length >= 9 && !args[8].isBlank() ? args[8] : DEFAULT_SESSION_TOKEN;
+        String model = args.length >= 10 && !args[9].isBlank() ? args[9] : null;
 
         // 按服务端约定组 spec_json：instruction（必填非空）、output_format（选填，缺省不写入该键）、
-        // timeout_seconds（必填，整数，服务端限制 60~86400）。用 protobuf Struct + JsonFormat 打印保证转义正确。
+        // timeout_seconds（必填，整数，服务端限制 60~86400）、model（选填，非空时服务端按阶段覆盖默认模型）。
+        // 用 protobuf Struct + JsonFormat 打印保证转义正确。
         Struct.Builder spec = Struct.newBuilder();
         spec.putFields("instruction", Value.newBuilder().setStringValue(instruction).build());
         if (outputFormat != null && !outputFormat.isBlank()) {
@@ -95,6 +98,9 @@ public final class AcceptanceClient {
         }
         if (!omitTimeout) {
             spec.putFields("timeout_seconds", Value.newBuilder().setNumberValue(timeoutSeconds).build());
+        }
+        if (model != null) {
+            spec.putFields("model", Value.newBuilder().setStringValue(model).build());
         }
         String specJson = JsonFormat.printer().print(spec.build());
 
@@ -115,6 +121,7 @@ public final class AcceptanceClient {
         System.out.println("error_code     = " + quote(response.getErrorCode()));
         System.out.println("error_message  = " + quote(response.getErrorMessage()));
         System.out.println("spec_json sent = " + specJson);
+        System.out.println("model sent     = " + (model == null ? "<absent>" : model));
 
         return response.getErrorCode().isEmpty() ? 0 : 2;
     }
@@ -204,7 +211,7 @@ public final class AcceptanceClient {
         System.err.println();
         System.err.println("Usage:");
         System.err.println("  java -cp <classpath> " + AcceptanceClient.class.getName()
-                + " create <host> <port> <targetObjectName> <clientRequestId> <instruction> <timeoutSeconds> [outputFormat] [sessionToken]");
+                + " create <host> <port> <targetObjectName> <clientRequestId> <instruction> <timeoutSeconds> [outputFormat] [sessionToken] [model]");
         System.err.println("  java -cp <classpath> " + AcceptanceClient.class.getName()
                 + " get <host> <port> <taskId> [sessionToken]");
         System.err.println();
@@ -212,5 +219,7 @@ public final class AcceptanceClient {
                 + " (get counts error_code or query_error_code); 1 = bad usage.");
         System.err.println("Defaults: sessionToken = \"" + DEFAULT_SESSION_TOKEN
                 + "\" (lane acceptance auth passthrough accepts any non-empty token).");
+        System.err.println("Optional positional args given as \"\" count as absent"
+                + " (lets you pass a trailing model without pinning outputFormat/sessionToken).");
     }
 }
