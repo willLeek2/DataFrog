@@ -147,7 +147,7 @@ public final class E2eMain {
         section("case2 拒绝路径");
         RegisterSemanticDefinitionResponse dup = svc.registerSemanticDefinition(
                 RegisterSemanticDefinitionRequest.newBuilder()
-                        .setName(defName).setVersion(defVersion)
+                        .setName(defName).setVersion(defVersion).setDisplayName("e2e 重复注册探针")
                         .setDefinition("e2e 重复注册探针").setCalculation("-").setUnit("-").setScope("-")
                         .build());
         record("reg-def-dup", dup);
@@ -168,6 +168,14 @@ public final class E2eMain {
         check("c2.coverage 区间倒置→INVALID_CONVENTION",
                 !badRange.getResult().getOk() && badRange.getResult().getCode() == ErrorCode.INVALID_CONVENTION,
                 "code=" + badRange.getResult().getCode());
+
+        RegisterDataObjectResponse badInputs = svc.registerDataObject(registerReq("e2e-bad-inputs", defName, defVersion,
+                CSV_V1, "2026-01-05", "2026-01-09", "csv", "").toBuilder()
+                .addInputs("e2e-no-such-input-object").build());
+        record("reg-bad-inputs", badInputs);
+        check("c2.inputs 引用未登记对象→INVALID_CONVENTION",
+                !badInputs.getResult().getOk() && badInputs.getResult().getCode() == ErrorCode.INVALID_CONVENTION,
+                "code=" + badInputs.getResult().getCode());
 
         RegisterDataObjectRequest noPk = registerReq("e2e-no-pk", defName, defVersion,
                 CSV_V1, "2026-01-05", "2026-01-09", "csv", "");
@@ -320,7 +328,7 @@ public final class E2eMain {
                 .addSemanticRefs(SemanticRef.newBuilder().setName(defName).setVersion(defVersion))
                 .setCoverageScope("样例").setFrequencyValue(1) // DAILY
                 .setGenMethodValue(2) // INDICATOR
-                .setGenTask("e2e").addInputs("e2e-sample")
+                .setGenTask("e2e")
                 .addPrimaryKey("trade_date")
                 .setAdjustmentValue(1) // RAW
                 .setCcyValue(1) // CNY
