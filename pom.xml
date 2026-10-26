@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- 独立项目：不进任何 git 仓库，仅作 014-data-02 泳道验收的 Dubbo 消费端 -->
+
+    <groupId>world.willfrog</groupId>
+    <artifactId>datafrog-acc-client</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>datafrog-acc-client</name>
+    <description>014-data-02 lane acceptance client: calls GenerationTaskService (tri direct URL, no registry, no Spring).</description>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- 与 datafrog-server 对齐（DataFrog 父 pom 同值），复用 alphafrog-micro 依赖基线 -->
+        <dubbo.version>3.3.2</dubbo.version>
+        <protobuf-java.version>3.25.3</protobuf-java.version>
+    </properties>
+
+    <dependencies>
+        <!-- 契约与生成类（GenerationTaskService 等 triple stub）。从 014-data-02 worktree 装入本地 .m2。 -->
+        <dependency>
+            <groupId>world.willfrog</groupId>
+            <artifactId>datafrog-api</artifactId>
+            <version>0.1.0-SNAPSHOT</version>
+            <exclusions>
+                <!-- 本工具是裸 CLI，不走 Spring 容器；dubbo 能力由下方 dubbo 全量包显式提供 -->
+                <exclusion>
+                    <groupId>org.apache.dubbo</groupId>
+                    <artifactId>dubbo-spring-boot-starter</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Dubbo 3.3.2 全量包（含 triple 协议 427 个类与 grpc 底包），与服务端版本一致 -->
+        <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo</artifactId>
+            <version>${dubbo.version}</version>
+        </dependency>
+
+        <!-- protobuf 运行时：生成消息类与 JsonFormat（组 spec_json 用） -->
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>${protobuf-java.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java-util</artifactId>
+            <version>${protobuf-java.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>
