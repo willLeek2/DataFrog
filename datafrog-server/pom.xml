@@ -57,19 +57,23 @@
           </dependency>
         -->
 
-        <!--
-          预留：PostgreSQL 数据源（与 application.yml 顶部的数据源注释块配套启用）。
-          <dependency>
-              <groupId>org.mybatis.spring.boot</groupId>
-              <artifactId>mybatis-spring-boot-starter</artifactId>
-              <version>3.0.3</version>
-          </dependency>
-          <dependency>
-              <groupId>org.postgresql</groupId>
-              <artifactId>postgresql</artifactId>
-              <version>42.7.4</version>
-          </dependency>
-        -->
+        <!-- PostgreSQL 数据源（014-data-01 数据对象存储模块启用）。 -->
+        <dependency>
+            <groupId>org.mybatis.spring.boot</groupId>
+            <artifactId>mybatis-spring-boot-starter</artifactId>
+            <version>3.0.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.4</version>
+        </dependency>
+        <!-- DuckDB JDBC：CSV 进 Parquet part 落盘与导出（内容存储，不占业务库）。 -->
+        <dependency>
+            <groupId>org.duckdb</groupId>
+            <artifactId>duckdb_jdbc</artifactId>
+            <version>1.3.1.0</version>
+        </dependency>
 
         <!--
           预留：Redis（与 application.yml 顶部的 Redis 注释块配套启用）。
