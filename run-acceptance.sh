@@ -17,9 +17,10 @@ mvn -q org.apache.maven.plugins:maven-dependency-plugin:3.6.1:build-classpath -D
 CP="target/classes:$(cat target/cp.txt)"
 
 # run <step-name> <client args...>：退出码与完整输出都留证
+# -Dfile.encoding=UTF-8：服务端错误文案是中文，缺省编码下 JVM 输出打成 ?
 run() {
   local name=$1; shift
-  java -cp "$CP" world.willfrog.acc.AcceptanceClient "$@" > "$EV/$name.txt" 2>&1
+  java -Dfile.encoding=UTF-8 -cp "$CP" world.willfrog.acc.AcceptanceClient "$@" > "$EV/$name.txt" 2>&1
   local code=$?
   echo "$code $name" | tee -a "$EV/exit-codes.txt"
 }
