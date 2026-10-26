@@ -32,7 +32,8 @@ message CreateGenerationTaskRequest {
   string target_object_name = 2;
   // 任务规格 JSON：行为边界、输出格式（用户样例或平台模板库引用）、时限（timeout_seconds，必填）。
   string spec_json = 3;
-  // 调用方幂等键：重复提交去重、不重复计费；命中直接返回已有任务。
+  // 调用方幂等键：同一用户内重复提交去重、不重复计费；命中直接返回已有任务。
+  // 去重维度是 (user_id, client_request_id)，跨用户撞键互不可见。
   string client_request_id = 4;
 }
 
@@ -42,7 +43,9 @@ message CreateGenerationTaskResponse {
   // true 表示本次是重复提交命中已有任务，未新建也未重复计费。
   bool deduplicated = 3;
   // 业务失败时的可机读错误码
-  // （UNAUTHENTICATED / CREDIT_INSUFFICIENT / GENERATION_IN_PROGRESS / INVALID_SPEC / GENERATION_LAUNCH_FAILED），成功为空。
+  // （UNAUTHENTICATED / INVALID_SPEC / CREDIT_INSUFFICIENT / GENERATION_IN_PROGRESS /
+  //   GENERATION_LAUNCH_FAILED；后端故障用 INTERNAL），成功为空。
+  // GENERATION_LAUNCH_FAILED 时任务行已落库（FAILED 且预扣全额回补），task_id 与 status 一并返回。
   string error_code = 4;
   string error_message = 5;
 }

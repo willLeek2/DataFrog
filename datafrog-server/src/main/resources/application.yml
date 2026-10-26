@@ -10,6 +10,11 @@ spring:
     username: ${AF_DB_MAIN_USER}
     password: ${AF_DB_MAIN_PASSWORD}
 
+# 014-data-02：MyBatis 下划线列名转驼峰实体属性（任务表 Mapper 用 SELECT *，必须开）。
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+
 # 预留：Redis。启用时同步取消 pom.xml 中 spring-boot-starter-data-redis 的注释。
 #   data:
 #     redis:

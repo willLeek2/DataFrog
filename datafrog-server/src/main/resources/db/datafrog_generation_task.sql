@@ -1,6 +1,7 @@
 -- 014-data-02 生成任务受理：任务表与约束。
 -- DDL 纪律与 014-data-01 一致：可重复执行、不使用迁移框架、泳道部署进程启动前执行；
 -- 服务启动时检查本表存在，缺失即启动失败（见 GenerationTaskSchemaGuard）。
+-- 文件位置与 014-data-01 对齐：统一放 datafrog-server/src/main/resources/db/，随 jar 一起走。
 
 CREATE TABLE IF NOT EXISTS datafrog_generation_task (
     id                TEXT PRIMARY KEY,              -- 任务编号（UUID）
@@ -20,9 +21,9 @@ CREATE TABLE IF NOT EXISTS datafrog_generation_task (
     finished_at       TIMESTAMPTZ
 );
 
--- 重复提交去重：同一调用方幂等键只建一条任务。
+-- 重复提交去重：同一用户内同一调用方幂等键只建一条任务（用户维度隔离，跨用户撞键互不可见）。
 CREATE UNIQUE INDEX IF NOT EXISTS datafrog_generation_task_client_request_id_uq
-    ON datafrog_generation_task (client_request_id);
+    ON datafrog_generation_task (user_id, client_request_id);
 
 -- 并发互斥：同一目标对象名只允许一条非终态任务（部分唯一索引）。
 CREATE UNIQUE INDEX IF NOT EXISTS datafrog_generation_task_active_target_uq

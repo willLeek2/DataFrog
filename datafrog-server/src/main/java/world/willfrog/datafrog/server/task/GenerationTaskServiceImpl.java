@@ -19,15 +19,14 @@ import world.willfrog.datafrog.server.client.AgentRunClient;
 import world.willfrog.datafrog.server.client.AuthValidationClient;
 import world.willfrog.datafrog.server.client.CreditClient;
 
-import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
  * 生成任务受理与受控运行（014-data-02）。
  *
- * create 处理顺序（方案 v2，经 wang 审查共识）：
- * 登录态校验 → 规格解析校验 → 余额校验 → 幂等去重 → 写任务表（ACCEPTED）→
- * 预扣记录 → 拉起受控运行（成功置 RUNNING，未拉起置 FAILED 并全额回补）。
+ * create 处理顺序（方案 v2 经 wang 审查修订，CR 一轮后调整）：登录态校验 → 规格解析校验 →
+ * 幂等去重（排在余额校验前：余额是创建当时的门槛，不该挡合法重试）→ 余额校验 →
+ * 写任务表（ACCEPTED）→ 预扣记录 → 拉起受控运行（成功置 RUNNING，未拉起置 FAILED 并全额回补）。
  * 同对象互斥由部分唯一索引承载：插入冲突时先对阻塞任务做一次惰性推进再重试一次，
  * 仍冲突返回 GENERATION_IN_PROGRESS，不设后台巡检。
  *
@@ -47,7 +46,7 @@ public class GenerationTaskServiceImpl extends GenerationTaskServiceImplBase {
     /** 推理费预估下限，用于受理时预扣；具体数值是开放项，待 frog 定积分口径后调整。 */
     static final int INFERENCE_FLOOR_CREDITS = 20;
     static final int PRECHARGE_CREDITS = INFERENCE_FLOOR_CREDITS + SURCHARGE_CREDITS;
-    /** ACCEPTED 态阻塞任务的宽限：超过此时长仍未拉起视为创建途中进程死亡，惰性置失败终态。 */
+    /** ACCEPTED 态任务的拉起宽限：超过此时长仍未写 run_id 视为创建途中进程死亡，惰性置失败终态并回补。 */
     static final long LAUNCH_GRACE_SECONDS = 120;
 
     static final long MIN_TIMEOUT_SECONDS = 60;
@@ -61,6 +60,8 @@ public class GenerationTaskServiceImpl extends GenerationTaskServiceImplBase {
     private static final String ERR_RUN_FAILED = "GENERATION_RUN_FAILED";
     private static final String ERR_TASK_TIMEOUT = "TASK_TIMEOUT";
     private static final String ERR_TASK_NOT_FOUND = "TASK_NOT_FOUND";
+    /** 后端故障（读余额、读运行状态等基础设施错误），与业务拒绝分开（wang CR 口径第 2 条）。 */
+    private static final String ERR_INTERNAL = "INTERNAL";
 
     private final AuthValidationClient authValidationClient;
     private final CreditClient creditClient;
@@ -114,21 +115,8 @@ public class GenerationTaskServiceImpl extends GenerationTaskServiceImplBase {
                     "spec_json.timeout_seconds must be an integer in [" + MIN_TIMEOUT_SECONDS + ", " + MAX_TIMEOUT_SECONDS + "]");
         }
 
-        // 余额校验：剩余积分需覆盖预扣额。
-        int remaining;
-        try {
-            remaining = creditClient.getRemainingCredits(userId);
-        } catch (Exception e) {
-            log.warn("get remaining credits failed: user={} err={}", userId, e.toString());
-            return createError(ERR_CREDIT_INSUFFICIENT, "failed to read remaining credits");
-        }
-        if (remaining < PRECHARGE_CREDITS) {
-            return createError(ERR_CREDIT_INSUFFICIENT,
-                    "remaining credits " + remaining + " < precharge " + PRECHARGE_CREDITS);
-        }
-
-        // 幂等去重快路径：命中直接返回已有任务，不新建也不重复计费。
-        GenerationTaskEntity existing = taskMapper.findByClientRequestId(request.getClientRequestId());
+        // 幂等去重（在余额校验之前）：命中直接返回已有任务，不新建也不重复计费。
+        GenerationTaskEntity existing = taskMapper.findByClientRequestId(userId, request.getClientRequestId());
         if (existing != null) {
             return CreateGenerationTaskResponse.newBuilder()
                     .setTaskId(existing.getId())
@@ -137,7 +125,20 @@ public class GenerationTaskServiceImpl extends GenerationTaskServiceImplBase {
                     .build();
         }
 
-        // 写任务表（ACCEPTED，规格快照）。唯一索引冲突时区分去重命中与同对象互斥。
+        // 余额校验：剩余积分需覆盖预扣额。读失败是后端故障，不映射成余额不足。
+        int remaining;
+        try {
+            remaining = creditClient.getRemainingCredits(userId);
+        } catch (Exception e) {
+            log.warn("get remaining credits failed: user={} err={}", userId, e.toString());
+            return createError(ERR_INTERNAL, "failed to read remaining credits");
+        }
+        if (remaining < PRECHARGE_CREDITS) {
+            return createError(ERR_CREDIT_INSUFFICIENT,
+                    "remaining credits " + remaining + " < precharge " + PRECHARGE_CREDITS);
+        }
+
+        // 写任务表（ACCEPTED，规格快照）。唯一索引冲突时区分去重竞态命中与同对象互斥。
         GenerationTaskEntity task = new GenerationTaskEntity();
         task.setId(UUID.randomUUID().toString());
         task.setUserId(userId);
@@ -171,7 +172,13 @@ public class GenerationTaskServiceImpl extends GenerationTaskServiceImplBase {
             log.warn("createRun failed, task marked FAILED with full refund: task={} err={}", task.getId(), e.toString());
             finalizeTerminal(task, GenerationTaskStateMachine.FAILED, ERR_LAUNCH_FAILED,
                     "createRun failed: " + e.getMessage(), null, 0);
-            return createError(ERR_LAUNCH_FAILED, "failed to launch agent run: " + e.getMessage());
+            // 任务行已落库（FAILED 且预扣全额回补），应答带上 task_id 方便调用方查询与核对。
+            return CreateGenerationTaskResponse.newBuilder()
+                    .setTaskId(task.getId())
+                    .setStatus(GenerationTaskStatus.FAILED)
+                    .setErrorCode(ERR_LAUNCH_FAILED)
+                    .setErrorMessage("failed to launch agent run: " + e.getMessage())
+                    .build();
         }
     }
 
@@ -181,7 +188,7 @@ public class GenerationTaskServiceImpl extends GenerationTaskServiceImplBase {
      * 返回 null 表示重试插入已成功，调用方继续走预扣与拉起运行。
      */
     private CreateGenerationTaskResponse handleInsertConflict(GenerationTaskEntity task) {
-        GenerationTaskEntity dedupHit = taskMapper.findByClientRequestId(task.getClientRequestId());
+        GenerationTaskEntity dedupHit = taskMapper.findByClientRequestId(task.getUserId(), task.getClientRequestId());
         if (dedupHit != null) {
             return CreateGenerationTaskResponse.newBuilder()
                     .setTaskId(dedupHit.getId())
@@ -204,22 +211,33 @@ public class GenerationTaskServiceImpl extends GenerationTaskServiceImplBase {
 
     /**
      * 惰性推进阻塞任务：RUNNING 的读运行状态，运行已终态或超规格时限则置终态；
-     * ACCEPTED 且超过拉起宽限仍未写 run_id 的，视为创建途中进程死亡，置失败终态。
+     * ACCEPTED 的超拉起宽限则置失败终态（与查询路径共用同一段判定）。
      */
     private void advanceBlockingTask(GenerationTaskEntity blocker) {
         try {
             if (GenerationTaskStateMachine.RUNNING.equals(blocker.getStatus()) && blocker.getRunId() != null) {
                 AgentRunStatusMessage runStatus = agentRunClient.getRunStatus(blocker.getUserId(), blocker.getRunId());
                 settleByRunStatus(blocker, runStatus);
-            } else if (GenerationTaskStateMachine.ACCEPTED.equals(blocker.getStatus())
-                    && blocker.getCreatedAt() != null
-                    && blocker.getCreatedAt().plusSeconds(LAUNCH_GRACE_SECONDS).isBefore(GenerationTaskStateMachine.nowUtc())) {
-                finalizeTerminal(blocker, GenerationTaskStateMachine.FAILED, ERR_LAUNCH_FAILED,
-                        "accepted but never launched within grace " + LAUNCH_GRACE_SECONDS + "s", null, 0);
+            } else {
+                advanceAcceptedIfStale(blocker);
             }
         } catch (Exception ex) {
             log.warn("lazy advance of blocking task failed: task={} err={}", blocker.getId(), ex.toString());
         }
+    }
+
+    /**
+     * ACCEPTED 死任务的惰性推进：超过拉起宽限仍未写 run_id，视为创建途中进程死亡，
+     * 置 FAILED（GENERATION_LAUNCH_FAILED）并全额回补预扣。互斥冲突路径与查询路径共用。
+     */
+    private void advanceAcceptedIfStale(GenerationTaskEntity task) {
+        if (!GenerationTaskStateMachine.ACCEPTED.equals(task.getStatus())
+                || task.getCreatedAt() == null
+                || task.getCreatedAt().plusSeconds(LAUNCH_GRACE_SECONDS).isAfter(GenerationTaskStateMachine.nowUtc())) {
+            return;
+        }
+        finalizeTerminal(task, GenerationTaskStateMachine.FAILED, ERR_LAUNCH_FAILED,
+                "accepted but never launched within grace " + LAUNCH_GRACE_SECONDS + "s", null, 0);
     }
 
     @Override
@@ -229,24 +247,28 @@ public class GenerationTaskServiceImpl extends GenerationTaskServiceImplBase {
             return getQueryError(ERR_UNAUTHENTICATED, "session token invalid: " + auth.getMessage());
         }
         GenerationTaskEntity task = taskMapper.findById(request.getTaskId());
-        if (task == null) {
+        // 属主校验：任务只对本主可见，查别人的任务与查不存在的任务同一应答（wang CR 建议第 1 条）。
+        if (task == null || !auth.getUserId().equals(task.getUserId())) {
             return getQueryError(ERR_TASK_NOT_FOUND, "task not found: " + request.getTaskId());
         }
 
-        // 非终态任务做惰性推进：运行已终态或超规格时限则置终态并结算。
+        // 非终态任务做惰性推进：ACCEPTED 超宽限置失败终态；RUNNING 读运行实态，
+        // 运行已终态或超规格时限则置终态并结算。
         String runStatusJson = "";
-        if (!GenerationTaskStateMachine.isTerminal(task.getStatus())
-                && GenerationTaskStateMachine.RUNNING.equals(task.getStatus())
-                && task.getRunId() != null) {
-            try {
-                AgentRunStatusMessage runStatus = agentRunClient.getRunStatus(task.getUserId(), task.getRunId());
-                if (isRunTerminal(runStatus.getStatus()) || isTaskTimedOut(task)) {
-                    settleByRunStatus(task, runStatus);
-                } else {
-                    runStatusJson = JsonFormat.printer().print(runStatus);
+        if (!GenerationTaskStateMachine.isTerminal(task.getStatus())) {
+            if (GenerationTaskStateMachine.RUNNING.equals(task.getStatus()) && task.getRunId() != null) {
+                try {
+                    AgentRunStatusMessage runStatus = agentRunClient.getRunStatus(task.getUserId(), task.getRunId());
+                    if (isRunTerminal(runStatus.getStatus()) || isTaskTimedOut(task)) {
+                        settleByRunStatus(task, runStatus);
+                    } else {
+                        runStatusJson = JsonFormat.printer().print(runStatus);
+                    }
+                } catch (Exception e) {
+                    log.warn("getRunStatus failed, task left as-is: task={} err={}", task.getId(), e.toString());
                 }
-            } catch (Exception e) {
-                log.warn("getRunStatus failed, task left as-is: task={} err={}", task.getId(), e.toString());
+            } else {
+                advanceAcceptedIfStale(task);
             }
             task = taskMapper.findById(task.getId());
         }
@@ -269,8 +291,9 @@ public class GenerationTaskServiceImpl extends GenerationTaskServiceImplBase {
     /**
      * 按运行实态给 RUNNING 任务置终态并结算（结算三档，拍板事项第 6 条「按已消耗结算」）：
      * 运行成功（COMPLETED/PARTIAL）实结 = 已消耗 + 附加费；运行失败按已消耗实结；
-     * 超规格时限置 TASK_TIMEOUT，按状态摘要里已消耗实结。已消耗取 getStatus 返回的
-     * total_credits_consumed，与主仓库结算管线同源。运行仍在进行且未超时则不动作。
+     * 超规格时限置 TASK_TIMEOUT，按状态摘要里已消耗实结，并尽力取消运行（不再继续烧积分）。
+     * 已消耗的权威源是 getStatus 返回的 total_credits_consumed，与主仓库结算管线同源；
+     * 不用 getRunCost（货币口径不是积分）。运行仍在进行且未超时则不动作。
      */
     private void settleByRunStatus(GenerationTaskEntity task, AgentRunStatusMessage runStatus) {
         int consumed = runStatus.getTotalCreditsConsumed();
@@ -281,12 +304,23 @@ public class GenerationTaskServiceImpl extends GenerationTaskServiceImplBase {
             finalizeTerminal(task, GenerationTaskStateMachine.FAILED, ERR_RUN_FAILED,
                     "agent run terminated with status " + runState, runStatus, consumed);
         } else if (isTaskTimedOut(task)) {
+            // 先取消运行再置终态：任务置终后平台不再结算，不能让运行继续烧积分。
+            // 取消是尽力动作，失败记日志不阻塞置终（运行侧还有 EXPIRED 机制）。
+            try {
+                agentRunClient.cancelRun(task.getUserId(), task.getRunId());
+            } catch (Exception e) {
+                log.warn("cancelRun on timeout failed (task finalization proceeds): task={} run={} err={}",
+                        task.getId(), task.getRunId(), e.toString());
+            }
             finalizeTerminal(task, GenerationTaskStateMachine.FAILED, ERR_TASK_TIMEOUT,
                     "run exceeded spec timeout", runStatus, consumed);
         }
     }
 
-    /** 写终态并记录结算意图；回补金额 = 预扣 - 实结，由 CreditClient 结算时一并记录。 */
+    /**
+     * 写终态并记录结算意图；回补金额 = 预扣 - 实结，由 CreditClient 结算时一并记录。
+     * updateTerminal 带非终态守卫，并发惰性推进只有一个能写上；写不上的跳过结算，防止重复 settle。
+     */
     private void finalizeTerminal(GenerationTaskEntity task, String status, String errorCode, String errorMessage,
                                   AgentRunStatusMessage runStatus, int settledCredits) {
         if (!GenerationTaskStateMachine.canTransition(task.getStatus(), status)) {
@@ -301,7 +335,11 @@ public class GenerationTaskServiceImpl extends GenerationTaskServiceImplBase {
         task.setErrorMessage(errorMessage);
         task.setCreditSettled(settledCredits);
         task.setFinishedAt(GenerationTaskStateMachine.nowUtc());
-        taskMapper.updateTerminal(task);
+        int updated = taskMapper.updateTerminal(task);
+        if (updated == 0) {
+            log.info("terminal update lost to concurrent finalization, settle skipped: task={} to={}", task.getId(), status);
+            return;
+        }
         creditClient.settle(task.getUserId(),
                 task.getCreditCharged() == null ? 0 : task.getCreditCharged(), settledCredits, task.getId());
     }

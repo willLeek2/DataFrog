@@ -29,7 +29,8 @@ public class GenerationTaskSchemaGuard implements ApplicationRunner {
             jdbcTemplate.queryForObject("SELECT 1 FROM datafrog_generation_task LIMIT 1", Integer.class);
         } catch (Exception e) {
             throw new IllegalStateException(
-                    "table datafrog_generation_task missing or unreadable; execute db/datafrog_generation_task.sql before deployment",
+                    "table datafrog_generation_task missing or unreadable; "
+                            + "execute datafrog-server/src/main/resources/db/datafrog_generation_task.sql before deployment",
                     e);
         }
         log.info("schema guard passed: datafrog_generation_task present");
