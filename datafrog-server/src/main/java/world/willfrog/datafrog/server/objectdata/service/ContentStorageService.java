@@ -265,7 +265,7 @@ public class ContentStorageService {
         for (String col : columns) {
             sb.append(csvField(col)).append(',')
               .append(csvField("")).append(',')
-              .append(csvField(""))
+              .append(csvField("")).append(',')
               .append(csvField("中文名与单位由生产侧在 014-data-03 登记"))
               .append('\n');
         }
