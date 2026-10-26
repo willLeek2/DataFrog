@@ -200,6 +200,8 @@ public final class E2eMain {
                 reg.getCard().getCoverageStart() + "~" + reg.getCard().getCoverageEnd());
         check("c3.v1 checksum 64hex", SHA256.matcher(reg.getCard().getContentChecksum()).matches(),
                 reg.getCard().getContentChecksum());
+        check("c3.compression 省略→默认 none 回显", "none".equals(reg.getCard().getCompression()),
+                reg.getCard().getCompression());
         String checksumV1 = reg.getCard().getContentChecksum();
 
         AppendToObjectResponse app = svc.appendToObject(AppendToObjectRequest.newBuilder()
