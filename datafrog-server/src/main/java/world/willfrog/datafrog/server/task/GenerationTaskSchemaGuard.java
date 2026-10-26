@@ -26,7 +26,9 @@ public class GenerationTaskSchemaGuard implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         try {
-            jdbcTemplate.queryForObject("SELECT 1 FROM datafrog_generation_task LIMIT 1", Integer.class);
+            // 用 COUNT(*) 而非 SELECT 1 LIMIT 1：空表返回 0 行会让 queryForObject 抛
+            // EmptyResultDataAccessException，把「表存在但为空」误判成缺表（泳道首战即踩中）。
+            jdbcTemplate.queryForObject("SELECT COUNT(*) FROM datafrog_generation_task", Integer.class);
         } catch (Exception e) {
             throw new IllegalStateException(
                     "table datafrog_generation_task missing or unreadable; "
