@@ -32,7 +32,8 @@ import java.util.UUID;
  *
  * 规格 JSON 的平台侧键名约定（与主仓库 context_json 扩展字段契约对齐后写死于此）：
  * instruction（行为边界，非空必填）、output_format（输出格式，选填）、
- * timeout_seconds（时限，必填，60 到 86400 秒）。
+ * timeout_seconds（时限，必填，60 到 86400 秒）、model（模型名，选填；非空时按阶段
+ * 覆盖服务端默认模型，合法性由主仓库允许名单在运行侧校验，本服务不维护名单）。
  */
 @DubboService
 @Service
@@ -115,6 +116,17 @@ public class GenerationTaskServiceImpl extends GenerationTaskServiceImplBase {
                     "spec_json.timeout_seconds must be an integer in [" + MIN_TIMEOUT_SECONDS + ", " + MAX_TIMEOUT_SECONDS + "]");
         }
 
+        // 可选 model 键（frog 2026-10-26：测试尽量用便宜模型）：透传为 createRun 的
+        // stage_config_json，按阶段覆盖服务端默认模型；只写模型名，endpoint 沿用服务端默认。
+        String stageConfigJson = null;
+        if (spec.getFieldsMap().containsKey("model")) {
+            String model = spec.getFieldsOrThrow("model").getStringValue();
+            if (model.isBlank()) {
+                return createError(ERR_INVALID_SPEC, "spec_json.model must be a non-blank string");
+            }
+            stageConfigJson = buildStageConfigJson(model);
+        }
+
         // 幂等去重（在余额校验之前）：命中直接返回已有任务，不新建也不重复计费。
         GenerationTaskEntity existing = taskMapper.findByClientRequestId(userId, request.getClientRequestId());
         if (existing != null) {
@@ -162,7 +174,7 @@ public class GenerationTaskServiceImpl extends GenerationTaskServiceImplBase {
 
         // 拉起受控运行；幂等键填任务编号，防止重试造成重复运行。
         try {
-            AgentRunMessage run = agentRunClient.createRun(userId, instruction, request.getSpecJson(), task.getId());
+            AgentRunMessage run = agentRunClient.createRun(userId, instruction, request.getSpecJson(), task.getId(), stageConfigJson);
             taskMapper.updateRunning(task.getId(), GenerationTaskStateMachine.RUNNING, run.getId());
             return CreateGenerationTaskResponse.newBuilder()
                     .setTaskId(task.getId())
@@ -179,6 +191,28 @@ public class GenerationTaskServiceImpl extends GenerationTaskServiceImplBase {
                     .setErrorCode(ERR_LAUNCH_FAILED)
                     .setErrorMessage("failed to launch agent run: " + e.getMessage())
                     .build();
+        }
+    }
+
+    /**
+     * 组装 createRun 的 stage_config_json：planning 与 execution 两阶段用同一个模型，只覆盖
+     * 模型名，endpoint 与其余阶段参数由服务端按本地默认补齐（合并规则是逐字段以运行自带值优先）。
+     */
+    private String buildStageConfigJson(String model) {
+        Struct.Builder stages = Struct.newBuilder();
+        for (String stageName : new String[]{"planning", "execution"}) {
+            stages.putFields(stageName, com.google.protobuf.Value.newBuilder()
+                    .setStructValue(Struct.newBuilder()
+                            .putFields("modelName", com.google.protobuf.Value.newBuilder()
+                                    .setStringValue(model).build()))
+                    .build());
+        }
+        try {
+            return JsonFormat.printer().print(stages.build());
+        } catch (Exception e) {
+            // 构造内容全在本方法内、动态取值只有一个字符串，打印实际不会失败；防御性降级为无覆盖。
+            log.warn("build stage_config_json failed, run uses server default model: err={}", e.toString());
+            return null;
         }
     }
 

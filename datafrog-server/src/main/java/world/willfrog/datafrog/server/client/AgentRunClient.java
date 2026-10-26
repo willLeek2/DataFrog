@@ -28,15 +28,21 @@ public class AgentRunClient {
     /**
      * 拉起一次受控 Agent 运行。任务规格三要素（行为边界、输出格式、时限）经 contextJson 注入；
      * idempotencyKey 填任务编号，防止本类调用方重试造成重复运行。
+     * stageConfigJson 非空时写入 createRun 请求（主仓库契约字段 11，注释写明「各阶段 LLM 配置」），
+     * 服务端合并规则是逐字段以运行自带值优先于本地默认，用于按任务指定便宜模型
+     * （frog 2026-10-26：测试尽量用便宜模型）。
      */
-    public AgentRunMessage createRun(String userId, String message, String contextJson, String idempotencyKey) {
-        CreateAgentRunRequest request = CreateAgentRunRequest.newBuilder()
+    public AgentRunMessage createRun(String userId, String message, String contextJson, String idempotencyKey,
+                                     String stageConfigJson) {
+        CreateAgentRunRequest.Builder builder = CreateAgentRunRequest.newBuilder()
                 .setUserId(userId)
                 .setMessage(message)
                 .setContextJson(contextJson)
-                .setIdempotencyKey(idempotencyKey)
-                .build();
-        return agentDubboService.createRun(request);
+                .setIdempotencyKey(idempotencyKey);
+        if (stageConfigJson != null && !stageConfigJson.isBlank()) {
+            builder.setStageConfigJson(stageConfigJson);
+        }
+        return agentDubboService.createRun(builder.build());
     }
 
     public AgentRunStatusMessage getRunStatus(String userId, String runId) {
