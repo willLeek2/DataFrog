@@ -46,30 +46,24 @@
             <version>${protobuf-java.version}</version>
         </dependency>
 
-        <!--
-          预留：调用 alphafrog 既有微服务的契约依赖。接入时按需在下方取消注释或复制条目，
-          前提是目标 Api 模块已 mvn install 到本机 .m2（或已按版本号发布到远端仓库）。
-          消费代码统一放在 world.willfrog.datafrog.server.client 包，见该包的 package-info。
-          <dependency>
-              <groupId>world.willfrog</groupId>
-              <artifactId>domestic-index-api</artifactId>
-              <version>1.0-SNAPSHOT</version>
-          </dependency>
-        -->
+        <!-- 014-data-02：调用主仓库 Agent 运行体系（AgentDubboService，group=langchain）。 -->
+        <dependency>
+            <groupId>world.willfrog</groupId>
+            <artifactId>agentApi</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
 
-        <!--
-          预留：PostgreSQL 数据源（与 application.yml 顶部的数据源注释块配套启用）。
-          <dependency>
-              <groupId>org.mybatis.spring.boot</groupId>
-              <artifactId>mybatis-spring-boot-starter</artifactId>
-              <version>3.0.3</version>
-          </dependency>
-          <dependency>
-              <groupId>org.postgresql</groupId>
-              <artifactId>postgresql</artifactId>
-              <version>42.7.4</version>
-          </dependency>
-        -->
+        <!-- 014-data-02：PostgreSQL 数据源（与 application.yml 顶部的数据源块配套）。 -->
+        <dependency>
+            <groupId>org.mybatis.spring.boot</groupId>
+            <artifactId>mybatis-spring-boot-starter</artifactId>
+            <version>3.0.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.4</version>
+        </dependency>
 
         <!--
           预留：Redis（与 application.yml 顶部的 Redis 注释块配套启用）。

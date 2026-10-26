@@ -2,13 +2,13 @@ spring:
   application:
     name: datafrog-server
 
-# 预留：PostgreSQL 数据源。启用时同步取消 datafrog-server/pom.xml 中 mybatis 与 postgresql 依赖的注释，
+# 014-data-02：PostgreSQL 数据源（与 datafrog-server/pom.xml 的 mybatis、postgresql 依赖配套），
 # 形态与 alphafrog 各业务服务一致（环境变量由部署环境注入）。
-#   datasource:
-#     driver-class-name: org.postgresql.Driver
-#     url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}
-#     username: ${AF_DB_MAIN_USER}
-#     password: ${AF_DB_MAIN_PASSWORD}
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}
+    username: ${AF_DB_MAIN_USER}
+    password: ${AF_DB_MAIN_PASSWORD}
 
 # 预留：Redis。启用时同步取消 pom.xml 中 spring-boot-starter-data-redis 的注释。
 #   data:
@@ -44,3 +44,9 @@ dubbo:
 # 泳道说明：应用零代码。泳道身份由 Beta 部署控制器经环境变量注入
 # （AF_LANE_TRAFFIC_SCOPE_ID，以及 dubbo.provider.parameters 里的 dubbo.tag 键），
 # 本服务与 alphafrog 既有服务同形态，部署进泳道后自动参与标签路由。
+
+# 014-data-02 过渡配置：主仓库鉴权校验 provider 落地前，本项为空（默认）时一切登录态判无效，
+# 受理链路在第一跳拦下；泳道验收期间设为验收用户标识，任何非空 session_token 视为该用户通过。
+datafrog:
+  auth:
+    passthrough-user-id: ${DATAFROG_AUTH_PASSTHROUGH_USER_ID:}
