@@ -281,8 +281,9 @@ public class DataObjectRegistryService {
                 Jsons.writeRefs(cmd.semanticRefs()), cmd.coverageScope(), cmd.frequency(), cmd.genMethod(),
                 cmd.genTask() == null ? "" : cmd.genTask(), Jsons.writeStringArray(cmd.inputs()),
                 Jsons.writeStringArray(cmd.primaryKey()), cmd.adjustment(), cmd.ccy(), 1,
-                cmd.exportFormat() == null ? "csv" : cmd.exportFormat(),
-                cmd.compression() == null ? "none" : cmd.compression(), "ACTIVE", now, now);
+                cmd.exportFormat() == null || cmd.exportFormat().isEmpty() ? "csv" : cmd.exportFormat(),
+                cmd.compression() == null || cmd.compression().isEmpty() ? "none" : cmd.compression(),
+                "ACTIVE", now, now);
     }
 
     private DataObject toDomain(DataObjectRow row) {

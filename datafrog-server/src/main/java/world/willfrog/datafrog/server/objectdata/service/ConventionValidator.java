@@ -32,8 +32,10 @@ public class ConventionValidator {
             throw new ObjectStoreExceptions.ConventionViolationException("输入对象未登记: " + String.join(", ", missingInputs));
         }
         validateCoverage(cmd.coverageStart(), cmd.coverageEnd());
-        String format = cmd.exportFormat() == null ? "csv" : cmd.exportFormat();
-        String compression = cmd.compression() == null ? "none" : cmd.compression();
+        // proto3 的 string getter 不返回 null（缺省即空串），省略参数的默认值判定必须按空串走，
+        // 否则合法的「省略 export_format / compression」会被下面的取值校验误拒（泳道 run2 实测）。
+        String format = cmd.exportFormat() == null || cmd.exportFormat().isEmpty() ? "csv" : cmd.exportFormat();
+        String compression = cmd.compression() == null || cmd.compression().isEmpty() ? "none" : cmd.compression();
         if (!"csv".equals(format)) {
             throw new ObjectStoreExceptions.ConventionViolationException("export_format 仅支持 csv: " + format);
         }
