@@ -40,6 +40,8 @@
     <modules>
         <module>datafrog-api</module>
         <module>datafrog-server</module>
+        <!-- 014-data-01 泳道验收消费端（仅本分支 wang/e2e-014data01；送审分支 wang/014-data-01 不含此模块） -->
+        <module>e2e</module>
     </modules>
 
     <build>
