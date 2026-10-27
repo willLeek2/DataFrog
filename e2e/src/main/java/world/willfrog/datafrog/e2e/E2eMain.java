@@ -188,17 +188,17 @@ public final class E2eMain {
                 "hits=1（首行恰等于边界，存在满足行即命中）");
         // misses：条件不成立
         execute(cfg, "w2.miss 条件不成立", cond(defName, "大于", "100.0", null), List.of("SYMA"), 0, 1,
-                "misses=1 原因含「条件不成立」");
+                "misses=1 原因含「条件不成立」", "条件不成立");
         // 算子不支持
         execute(cfg, "w2.miss 算子不支持", cond(defName, "包含", "1", null), List.of("SYMA"), 0, 1,
-                "misses=1 原因含「算子不支持」");
+                "misses=1 原因含「算子不支持」", "算子不支持");
         // time_scope 范围内/外
         execute(cfg, "w2.time_scope 内命中", cond(defName, "大于", "10.2",
                         scope("2026-01-07", "2026-01-08")), List.of("SYMA"), 1, 0,
                 "hits=1（范围内有满足行 11.0/11.5）");
         execute(cfg, "w2.time_scope 外未命中", cond(defName, "大于", "10.2",
                         scope("2025-01-01", "2025-01-31")), List.of("SYMA"), 0, 1,
-                "misses=1 原因含「时间范围内没有行」");
+                "misses=1 原因含「时间范围内没有行」", "时间范围内没有行");
         // 池子缺失 400 专用码
         HttpResult r0 = httpPost(cfg, "/condition-filters/execute",
                 "{\"conditions\":[" + cond(defName, "等于", "1", null) + "],\"symbolPool\":[]}");
@@ -215,12 +215,12 @@ public final class E2eMain {
 
         // 没有挂靠对象：语义名乱写
         execute(cfg, "w2.miss 没有挂靠对象", cond("no_such_semantic_e2e05", "等于", "1", null),
-                List.of("SYMA"), 0, 1, "misses=1 原因含「没有挂靠对象」");
+                List.of("SYMA"), 0, 1, "misses=1 原因含「没有挂靠对象」", "没有挂靠对象");
         // 挂靠对象不唯一：登记第二个挂同一语义名的对象
         RegisterDataObjectResponse regE2 = register(svc, cfg, objName(cfg, "e2"), defName, csv);
         check("w2.前置第二对象登记 ok", regE2.getResult().getOk(), regE2.getResult().getMessage());
         execute(cfg, "w2.miss 挂靠对象不唯一", cond(defName, "等于", "11.5", null),
-                List.of("SYMA"), 0, 1, "misses=1 原因含「挂靠对象不唯一」");
+                List.of("SYMA"), 0, 1, "misses=1 原因含「挂靠对象不唯一」", "挂靠对象不唯一");
 
         // ── w3 执行段对 04 遗留 B 对象（内容真实，动态适配） ──
         section("w3 D3 执行段（04 B 对象）");
@@ -351,7 +351,7 @@ public final class E2eMain {
 
         // ── w9-403 维护端点鉴权（admin 名单未配窗口） ──
         section("w9 D9 维护鉴权（名单未配）");
-        HttpResult m0 = httpGet(cfg, "/maintenance/status");
+        HttpResult m0 = httpGet(cfg, "/maintenance/semantic-index/status");
         check("w9.status 403（名单空全拒）", m0.status == 403, "status=" + m0.status);
         HttpResult rb0resp = httpPost(cfg, "/maintenance/semantic-index/rebuild", "{}");
         check("w9.rebuild 403（名单空全拒）", rb0resp.status == 403, "status=" + rb0resp.status);
@@ -373,7 +373,7 @@ public final class E2eMain {
 
     private void phase1b(DataObjectService svc, Config cfg) throws Exception {
         section("phase1b w9 名单内");
-        HttpResult m1 = httpGet(cfg, "/maintenance/status");
+        HttpResult m1 = httpGet(cfg, "/maintenance/semantic-index/status");
         check("w9b.status 200（名单含运行身份）", m1.status == 200,
                 "status=" + m1.status + " body=" + clip(m1.body));
         if (m1.status == 200) {
@@ -531,7 +531,7 @@ public final class E2eMain {
         return RegisterDataObjectRequest.newBuilder()
                 .setName(name).setDescription("e2e05 " + name)
                 .setSourceType(world.willfrog.datafrog.idl.SourceType.SYSTEM).setOwner(cfg.owner()).setVisibility(world.willfrog.datafrog.idl.Visibility.PRIVATE)
-                .addSemanticRefs(SemanticRef.newBuilder().setName(defName).build())
+                .addSemanticRefs(SemanticRef.newBuilder().setName(defName).setVersion(1).build())
                 .setCoverageScope("e2e05-" + stamp).setFrequency(world.willfrog.datafrog.idl.Frequency.DAILY)
                 .setGenMethod(world.willfrog.datafrog.idl.GenMethod.AGENT).setCoverageStart("2026-01-05").setCoverageEnd("2026-01-08")
                 .addPrimaryKey("symbol").addPrimaryKey("trade_date")
@@ -564,6 +564,12 @@ public final class E2eMain {
      */
     private void execute(Config cfg, String label, String conditionJson, List<String> pool,
                          int expectHits, int expectMisses, String meaning) throws Exception {
+        execute(cfg, label, conditionJson, pool, expectHits, expectMisses, meaning, null);
+    }
+
+    /** expectReason 非空时还要求 misses 逐条原因含该串——只数个数不验文案会把「没建成对象」的连锁失败误判为过（phase1 首跑实测教训）。 */
+    private void execute(Config cfg, String label, String conditionJson, List<String> pool,
+                         int expectHits, int expectMisses, String meaning, String expectReason) throws Exception {
         HttpResult r = httpPost(cfg, "/condition-filters/execute",
                 "{\"conditions\":[" + conditionJson + "],\"symbolPool\":"
                         + json.writeValueAsString(pool) + "}");
@@ -582,6 +588,14 @@ public final class E2eMain {
             }
             if (ok) {
                 ok = hits + misses == pool.size();
+            }
+            if (ok && expectReason != null) {
+                for (JsonNode miss : body.path("misses")) {
+                    if (!miss.path("reason").asText("").contains(expectReason)) {
+                        ok = false;
+                        break;
+                    }
+                }
             }
         }
         check(label + "（" + meaning + "）", ok, detail);
