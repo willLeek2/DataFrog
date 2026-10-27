@@ -31,11 +31,16 @@ public class QdrantClientProvider {
     /** 单次调用的最长等待；Qdrant 不可达时 gRPC 自身的重连退避可能比预期久，统一卡 10 秒。 */
     static final long RPC_TIMEOUT_SECONDS = 10;
 
+    /** 集合确保失败后的冷却窗口：窗口内不再重试，直接把调用放过去让读写自己失败。 */
+    private static final long ENSURE_FAILURE_COOLDOWN_MS = 30_000;
+
     private final SemanticIndexSettings settings;
     private QdrantClient client;
     private int builtVersion = -1;
     /** 已完成集合确保的标识（客户端版本 + 集合名 + 维度），三者任一变化都要重新确保。 */
     private String ensuredKey = "";
+    /** 上次集合确保失败的时刻（epoch 毫秒）；0 表示不在冷却期。 */
+    private long ensureFailedAtEpochMs = 0;
 
     public QdrantClientProvider(SemanticIndexSettings settings) {
         this.settings = settings;
@@ -59,8 +64,17 @@ public class QdrantClientProvider {
         String collection = settings.getCollection();
         String key = builtVersion + ":" + collection + ":" + settings.getEmbeddingDim();
         if (!key.equals(ensuredKey)) {
-            if (ensureCollection(collection, settings.getEmbeddingDim())) {
-                ensuredKey = key;
+            // 冷却期内跳过确保：Qdrant 宕机时每次调用都在本锁内白等一个超时会放大成
+            // 所有登记/升版串行排队，冷却期把重试压到 30 秒一次
+            boolean inCooldown = ensureFailedAtEpochMs > 0
+                    && System.currentTimeMillis() - ensureFailedAtEpochMs < ENSURE_FAILURE_COOLDOWN_MS;
+            if (!inCooldown) {
+                if (ensureCollection(collection, settings.getEmbeddingDim())) {
+                    ensuredKey = key;
+                    ensureFailedAtEpochMs = 0;
+                } else {
+                    ensureFailedAtEpochMs = System.currentTimeMillis();
+                }
             }
         }
         return client;

@@ -1,9 +1,9 @@
 package world.willfrog.datafrog.server.httpapi;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import world.willfrog.datafrog.server.objectdata.service.ContentStorageService;
 
 import java.nio.file.Path;
 import java.util.Locale;
@@ -12,9 +12,9 @@ import java.util.regex.Pattern;
 /**
  * 导出下载的文件定位与响应内容类型。
  *
- * 目录公式必须与 ContentStorageService.exportCsv 保持一致（那边没暴露查询方法，
- * 公式在本类平行维护，改动需两处同步）：数据根/&lt;objectId&gt;/export/v&lt;version&gt;。
- * 同一对象同一版本重复导出覆盖同一目录，所以「文件已存在就不必再触发导出」。
+ * 导出目录公式单一来源是 ContentStorageService.exportDirOf（本类委托调用，
+ * 拼法不在两处维护）。同一对象同一版本重复导出覆盖同一目录，
+ * 所以「文件已存在就不必再触发导出」。
  */
 @Component
 public class ExportFileSupport {
@@ -22,10 +22,10 @@ public class ExportFileSupport {
     /** 下载文件名的字符白名单：防路径穿越（借 ../ 这类片段逃出目标目录的注入手法）。 */
     private static final Pattern SAFE_FILE_NAME = Pattern.compile("^[A-Za-z0-9._-]+$");
 
-    private final String dataRoot;
+    private final ContentStorageService contentStorage;
 
-    public ExportFileSupport(@Value("${datafrog.objectstore.data-root:data/objectstore}") String dataRoot) {
-        this.dataRoot = dataRoot;
+    public ExportFileSupport(ContentStorageService contentStorage) {
+        this.contentStorage = contentStorage;
     }
 
     /**
@@ -42,9 +42,9 @@ public class ExportFileSupport {
         return file;
     }
 
-    /** 与 ContentStorageService 的导出目录公式保持一致（见类注释）。 */
+    /** 目录公式委托 ContentStorageService（编译期单点）；normalize 保落点比较不受相对段影响。 */
     public Path exportDirOf(String objectId, int version) {
-        return Path.of(dataRoot, objectId, "export", "v" + version).normalize();
+        return contentStorage.exportDirOf(objectId, version).normalize();
     }
 
     /** 不符字符白名单即 400 INVALID_ARGUMENT（方案口径，先于一切文件操作执行）。 */

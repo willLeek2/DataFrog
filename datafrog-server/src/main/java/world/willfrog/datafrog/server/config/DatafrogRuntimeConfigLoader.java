@@ -164,6 +164,10 @@ public class DatafrogRuntimeConfigLoader implements ApplicationListener<NacosLoc
             if (fileMapper == null) {
                 ObjectMapper copy = objectMapper.copy();
                 copy.setPropertyNamingStrategy(PropertyNamingStrategies.LOWER_CAMEL_CASE);
+                // 示例与手工放置的文件里允许出现 _ 开头的说明键：容忍未知字段的行为显式写在
+                // 代码里，不依赖「Spring Boot 注入的 ObjectMapper 恰好默认关闭未知字段报错」这个隐含前提
+                copy.configure(com.fasterxml.jackson.databind.DeserializationFeature
+                        .FAIL_ON_UNKNOWN_PROPERTIES, false);
                 fileMapper = copy;
             }
             return fileMapper;

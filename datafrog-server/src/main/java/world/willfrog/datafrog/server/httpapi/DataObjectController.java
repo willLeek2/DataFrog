@@ -5,8 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.protobuf.util.JsonFormat;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -49,11 +47,9 @@ import java.nio.file.Path;
 @RequestMapping(SessionAuthFilter.API_PREFIX)
 public class DataObjectController {
 
-    private static final Logger log = LoggerFactory.getLogger(DataObjectController.class);
-
-    /** 与 01 内部分页常量同口径：缺省页大小与页大小上限。 */
-    private static final int DEFAULT_LIMIT = 20;
-    private static final int MAX_LIMIT = 200;
+    /** 分页口径单一来源是 01 的公开常量，缺省页大小与页大小上限不在两处维护。 */
+    private static final int DEFAULT_LIMIT = DataObjectServiceImpl.DEFAULT_PAGE_SIZE;
+    private static final int MAX_LIMIT = DataObjectServiceImpl.MAX_PAGE_SIZE;
 
     private final DataObjectServiceImpl dataObjectService;
     private final DataObjectMapper dataObjectMapper;
@@ -158,6 +154,11 @@ public class DataObjectController {
      * GET /data-objects/{id}/export?version=：触发导出并回分片清单。
      * version 缺省或非正时取登记卡 current_version（正常流程即 ACTIVE 行）。不回传服务端的
      * export_dir（服务器内部路径不下发），每片改附本端点的下载路径。
+     *
+     * 已知边界（审查 P2 记账，接受现状）：本端点按方案字面每次触发全量重导出（清空目录重写），
+     * 与下载通道的「文件已在就跳过」不完全对称；并发下「下载在读、导出清空重写」有竞态窗口，
+     * 已打开句柄能读完，但「校验存在→打开」之间可能 FileNotFoundException 落成 500。
+     * 窗口小、影响低，将来如需收紧再做「清单齐整就跳过重导出」。
      */
     @GetMapping("/data-objects/{objectId}/export")
     public JsonNode export(@PathVariable String objectId,
@@ -215,6 +216,12 @@ public class DataObjectController {
         int effectiveVersion = resolveVersion(version, existing.getCard().getCurrentVersion());
         Path file = exportFiles.resolveShardFile(objectId, effectiveVersion, fileName);
         if (!Files.isRegularFile(file)) {
+            if (Files.isDirectory(exportFiles.exportDirOf(objectId, effectiveVersion))) {
+                // 导出目录在而文件不在 = 文件名不在本次导出清单里（客户端笔误或拿了旧清单），
+                // 回 404；不触发无谓的全量导出（大对象时是重 IO）再回 500
+                throw new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND",
+                        "本次导出清单里没有这个文件: " + fileName);
+            }
             ExportDataObjectResponse exported = dataObjectService.exportDataObject(
                     ExportDataObjectRequest.newBuilder().setObjectId(objectId).setVersion(effectiveVersion).build());
             if (!exported.getResult().getOk()) {
@@ -222,8 +229,9 @@ public class DataObjectController {
             }
         }
         if (!Files.isRegularFile(file)) {
-            log.error("导出后仍定位不到导出文件: object={} version={} file={}", objectId, effectiveVersion, file);
-            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL", "内部错误");
+            // 刚导出完仍定位不到 = 文件名本就不在清单里，同样归 404 而不是 500
+            throw new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND",
+                    "本次导出清单里没有这个文件: " + fileName);
         }
         response.setStatus(HttpServletResponse.SC_OK);
         response.setContentType(exportFiles.contentTypeFor(fileName).toString());

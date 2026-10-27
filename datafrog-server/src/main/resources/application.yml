@@ -87,6 +87,9 @@ datafrog:
       server-addr: ${NACOS_ADDRESS:127.0.0.1}:8848
       namespace: ${DATAFROG_CONFIG_NACOS_NAMESPACE:}
       group: ${DATAFROG_CONFIG_NACOS_GROUP:datafrog-config}
+      # 桥的轮询间隔（毫秒）：Nacos 监听器推送之外，按此间隔再向 Nacos 查询一次各订阅的
+      # 最新内容作补充，防止推送丢失后长期不更新。键在 NacosConfigBridge 的 @Scheduled 上生效。
+      refresh-interval-ms: ${DATAFROG_CONFIG_NACOS_REFRESH_INTERVAL_MS:30000}
       subscriptions:
         - data-id: ${DATAFROG_CONFIG_NACOS_RUNTIME_DATA_ID:datafrog-runtime.json}
           group: ${DATAFROG_CONFIG_NACOS_GROUP:datafrog-config}
@@ -96,3 +99,6 @@ datafrog:
   # 为空时桥跳过该订阅、加载器找不到文件，全部回退环境变量默认值。
   runtime:
     config-file: ${DATAFROG_RUNTIME_CONFIG_FILE:}
+    # 加载器轮询写盘文件修改时间的间隔（毫秒）：桥写盘成功会发事件立刻重读，本项是事件
+    # 丢失时的补充轮询。键在 DatafrogRuntimeConfigLoader 的 @Scheduled 上生效。
+    config-refresh-interval-ms: ${DATAFROG_RUNTIME_CONFIG_REFRESH_INTERVAL_MS:10000}

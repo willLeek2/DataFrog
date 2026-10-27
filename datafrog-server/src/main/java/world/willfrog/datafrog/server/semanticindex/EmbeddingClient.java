@@ -1,9 +1,11 @@
 package world.willfrog.datafrog.server.semanticindex;
 
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -23,7 +25,12 @@ public class EmbeddingClient {
     private final SemanticIndexSettings settings;
 
     public EmbeddingClient(RestClient.Builder builder, SemanticIndexSettings settings) {
-        this.restClient = builder.build();
+        // 本调用走对象登记/升版的写路径，不配超时会一直挂到对端断连才返回：
+        // 连接 5 秒（远端不可达快速失败），读 30 秒（向量化接口比一般查询慢，留余量）
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofSeconds(5));
+        factory.setReadTimeout(Duration.ofSeconds(30));
+        this.restClient = builder.requestFactory(factory).build();
         this.settings = settings;
     }
 
@@ -57,6 +64,14 @@ public class EmbeddingClient {
         List<Double> raw = (List<Double>) data.get(0).get("embedding");
         if (raw == null || raw.isEmpty()) {
             throw new IllegalStateException("embedding api returned empty embedding vector");
+        }
+        int expectedDim = settings.getEmbeddingDim();
+        if (raw.size() != expectedDim) {
+            // 端点实际返回的维度与配置期望不符时，向量进不了既定维度的集合
+            // （Qdrant 按固定维度建集），混维写入会整体报错或检索全错，当场拦下
+            throw new IllegalStateException("embedding api returned dim " + raw.size()
+                    + " but configured dim is " + expectedDim
+                    + " (datafrog.semanticindex.embedding-dim)");
         }
         return raw.stream().map(Double::floatValue).toList();
     }

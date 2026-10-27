@@ -59,7 +59,14 @@ public class GenerationTaskController {
                 .build();
         CreateGenerationTaskResponse response = generationTaskService.createGenerationTask(protoRequest);
         if (!response.getErrorCode().isEmpty()) {
-            throw errorMapping.fromTaskErrorCode(response.getErrorCode(), response.getErrorMessage());
+            ApiException error = errorMapping.fromTaskErrorCode(response.getErrorCode(), response.getErrorMessage());
+            if (!response.getTaskId().isEmpty()) {
+                // 02 契约明文保证 GENERATION_LAUNCH_FAILED 时任务行已落库、task_id 与 status
+                // 一并返回——经 problem+json 扩展属性带出，调用方拿得到任务号去查询核对
+                error.withProperty("taskId", response.getTaskId())
+                        .withProperty("status", response.getStatus().name());
+            }
+            throw error;
         }
         return toJson(response);
     }

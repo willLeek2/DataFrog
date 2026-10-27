@@ -3,6 +3,7 @@ package world.willfrog.datafrog.server.semanticindex;
 import io.qdrant.client.grpc.Points.ScoredPoint;
 import io.qdrant.client.grpc.Points.SearchPoints;
 import io.qdrant.client.grpc.Points.PointStruct;
+import io.qdrant.client.grpc.Points.WithPayloadSelector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -96,6 +97,9 @@ public class QdrantSemanticIndexService implements SemanticIndexService {
                             .setCollectionName(settings.getCollection())
                             .addAllVector(vector)
                             .setLimit(limit)
+                            // Qdrant 默认不回 payload（向量点上附带的元数据），不回就拿不到
+                            // object_id，主仓库 RagSearchServiceImpl 同款调用也显式开了这个开关
+                            .setWithPayload(WithPayloadSelector.newBuilder().setEnable(true).build())
                             .build())
                     .get(QdrantClientProvider.RPC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
@@ -106,8 +110,15 @@ public class QdrantSemanticIndexService implements SemanticIndexService {
         }
         List<SemanticHit> hits = new ArrayList<>(points.size());
         for (ScoredPoint point : points) {
-            String objectId = point.getPayloadMap().get("object_id").getStringValue();
-            hits.add(new SemanticHit(objectId, point.getScore()));
+            io.qdrant.client.grpc.JsonWithInt.Value objectIdValue = point.getPayloadMap().get("object_id");
+            if (objectIdValue == null || objectIdValue.getStringValue().isEmpty()) {
+                // 集合里出现没有 object_id 的点说明写入侧出了偏差，跳过该点比裸抛空指针
+                // 更能保住其余命中，同时留 warn 日志给排查
+                log.warn("[QdrantSemanticIndexService] 命中点缺 object_id，已跳过 pointId={}",
+                        point.getId());
+                continue;
+            }
+            hits.add(new SemanticHit(objectIdValue.getStringValue(), point.getScore()));
         }
         return hits;
     }
