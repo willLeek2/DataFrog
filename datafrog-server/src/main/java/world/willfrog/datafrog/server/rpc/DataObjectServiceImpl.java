@@ -434,8 +434,14 @@ public class DataObjectServiceImpl extends DubboDataObjectServiceTriple.DataObje
                 .build();
     }
 
+    // source_type 同为库侧非空列（bob 261028 补漏：与 visibility/frequency/gen_method 同一类，
+    // 未声明时同样按约定违例拒绝，词表 system | user；adjustment/ccy 两列允许空、保持未声明为空不动）。
     private static String srcValue(SourceType v) {
-        return v == SourceType.SOURCE_UNKNOWN ? null : v.name().toLowerCase(Locale.ROOT);
+        if (v == SourceType.SOURCE_UNKNOWN) {
+            throw new ObjectStoreExceptions.ConventionViolationException(
+                    "source_type 未声明（词表：system | user，见规范篇第 14 节）");
+        }
+        return v.name().toLowerCase(Locale.ROOT);
     }
 
     // 014-data-04 泳道实测修：枚举声明字段（visibility/frequency/gen_method）在库里全部 NOT NULL，
