@@ -10,11 +10,10 @@ spring:
     username: ${AF_DB_MAIN_USER}
     password: ${AF_DB_MAIN_PASSWORD}
 
-# 数据对象存储：内容（Parquet part 与导出文件）的数据根目录，
-# 相对路径按进程工作目录解析，生产由部署环境注入绝对路径。
-datafrog:
-  objectstore:
-    data-root: ${DATAFROG_OBJECTSTORE_DATA_ROOT:data/objectstore}
+# 014-data-06：HTTP REST 入口端口（server.httpapi 包）。与 Dubbo tri 端口 50070 并存；
+# 边缘反向代理按路径把数据平台请求送到此端口。
+server:
+  port: ${DATAFROG_HTTP_PORT:8070}
 
 # MyBatis 下划线列名转驼峰实体属性（任务表 Mapper 用 SELECT *，必须开）。
 mybatis:
@@ -48,16 +47,47 @@ dubbo:
   consumer:
     check: false
 
-# 预留：热配置。alphafrog 使用 common 模块的自研 NacosConfigBridge（属性前缀 alphafrog.config.nacos，
-# Beta 组 alphafrog-beta-config、生产组 alphafrog-config）。DataFrog 接入热配置时从 alphafrog common
-# 复制该桥或抽共享库，组名（datafrog-config / datafrog-beta-config）由运维工具改造时一并登记。
-
 # 泳道说明：应用零代码。泳道身份由 Beta 部署控制器经环境变量注入
 # （AF_LANE_TRAFFIC_SCOPE_ID，以及 dubbo.provider.parameters 里的 dubbo.tag 键），
 # 本服务与 alphafrog 既有服务同形态，部署进泳道后自动参与标签路由。
 
-# 014-data-02 过渡配置：主仓库鉴权校验 provider 落地前，本项为空（默认）时一切登录态判无效，
-# 受理链路在第一跳拦下；泳道验收期间设为验收用户标识，任何非空 session_token 视为该用户通过。
+# DataFrog 平台自有配置统一收在唯一一个顶层 datafrog 块下。
+# 注意：YAML 顶层键重复时后块会整盖前块，01 与 02 曾各写一个顶层 datafrog 块
+# （objectstore 块被 auth 块整盖，靠 @Value 默认值才没出事），06 起合并为一块。
 datafrog:
+  # 数据对象存储：内容（Parquet part 与导出文件）的数据根目录，
+  # 相对路径按进程工作目录解析，生产由部署环境注入绝对路径。
+  objectstore:
+    data-root: ${DATAFROG_OBJECTSTORE_DATA_ROOT:data/objectstore}
+  # 014-data-02 过渡配置：主仓库鉴权校验 provider 落地前，本项为空（默认）时一切登录态判无效，
+  # 受理链路在第一跳拦下；泳道验收期间设为验收用户标识，任何非空 session_token 视为该用户通过。
+  # 014-data-06 起经热配置桥改为热配置优先、本环境变量在热配置缺键时回退（见下方 config.nacos）。
   auth:
     passthrough-user-id: ${DATAFROG_AUTH_PASSTHROUGH_USER_ID:}
+  # 014-data-06：语义索引接线（server.semanticindex 包）。Qdrant 复用 alphafrog 共享实例
+  # （infra 的 shared-qdrant，gRPC 6334 经容器网络可达，无 API key），本平台用独立集合。
+  # 向量化走 OpenAI 兼容端点（与主仓库 externalInfoService 的 EmbeddingApiClient 同口径），
+  # 维度必须与集合维度一致。地址与集合名的运行时调整走下方热配置，环境变量在热配置缺键时回退。
+  semanticindex:
+    qdrant-host: ${DATAFROG_QDRANT_HOST:shared-qdrant}
+    qdrant-port: ${DATAFROG_QDRANT_PORT:6334}
+    collection: ${DATAFROG_QDRANT_COLLECTION:datafrog_objects}
+    embedding-base-url: ${DATAFROG_EMBEDDING_BASE_URL:https://api.openai.com/v1}
+    embedding-api-key: ${DATAFROG_EMBEDDING_API_KEY:}
+    embedding-model: ${DATAFROG_EMBEDDING_MODEL:text-embedding-3-small}
+    embedding-dim: ${DATAFROG_EMBEDDING_DIM:1024}
+  # 014-data-06：热配置桥（server.config 包，复制自主仓库 common 的 NacosConfigBridge，
+  # 属性前缀从 alphafrog.config.nacos 改为 datafrog.config.nacos）。组名生产 datafrog-config、
+  # Beta 泳道 datafrog-beta-config（部署控制器注入 DATAFROG_CONFIG_NACOS_GROUP，登记动作知会运维）。
+  # 订阅的运行时键写盘成 JSON 文件，消费方读不到文件时回退本文件里的环境变量默认值，
+  # 迁入期不出现配置空窗。桥默认关闭，部署环境把 DATAFROG_CONFIG_NACOS_ENABLED 置 true 启用。
+  config:
+    nacos:
+      enabled: ${DATAFROG_CONFIG_NACOS_ENABLED:false}
+      server-addr: ${NACOS_ADDRESS:127.0.0.1}:8848
+      namespace: ${DATAFROG_CONFIG_NACOS_NAMESPACE:}
+      group: ${DATAFROG_CONFIG_NACOS_GROUP:datafrog-config}
+      subscriptions:
+        - data-id: ${DATAFROG_CONFIG_NACOS_RUNTIME_DATA_ID:datafrog-runtime.json}
+          group: ${DATAFROG_CONFIG_NACOS_GROUP:datafrog-config}
+          target-file: ${DATAFROG_RUNTIME_CONFIG_FILE:}

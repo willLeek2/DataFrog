@@ -19,6 +19,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
         </dependency>
+        <!-- 014-data-06：HTTP REST 入口层（server.httpapi 包），平台单体对外 serve 的必要条件。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.apache.dubbo</groupId>
             <artifactId>dubbo-spring-boot-starter</artifactId>
@@ -69,6 +74,21 @@
             <groupId>org.duckdb</groupId>
             <artifactId>duckdb_jdbc</artifactId>
             <version>1.3.1.0</version>
+        </dependency>
+
+        <!-- 014-data-06：Qdrant 官方 Java 客户端（gRPC 形态），语义索引接线用。
+             版本与主仓库 externalInfoService 保持一致（该模块已在生产用同一客户端连共享 Qdrant）。 -->
+        <dependency>
+            <groupId>io.qdrant</groupId>
+            <artifactId>client</artifactId>
+            <version>1.16.0</version>
+        </dependency>
+        <!-- 014-data-06：热配置桥（server.config 包复制自主仓库 common 的 NacosConfigBridge）。
+             版本与主仓库 common 模块保持一致。 -->
+        <dependency>
+            <groupId>com.alibaba.nacos</groupId>
+            <artifactId>nacos-client</artifactId>
+            <version>2.4.3</version>
         </dependency>
 
         <!--
