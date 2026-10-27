@@ -539,7 +539,9 @@ public final class E2eMain {
         boolean allPartialIn = new LinkedHashSet<>(idListOf(small.cards)).containsAll(expectedPartial);
         check("c3.PARTIAL 候选含全部构造的 PARTIAL 对象（Q1..Q5+U）", allPartialIn,
                 "expected=" + expectedPartial.size());
-        check("c3.PARTIAL 小页页数>=4（候选跨页界，页界在我方对象内）", small.pages >= 4,
+        // 候选=Q1..Q5+U 共 6 个，pageSize=2 → 3 页，页界两处都在我方候选集内（>=3 即达标）。
+        // 原阈值 >=4 是按 7 候选写的笔误，泳道首轮实测 pages=3 FAIL，判读为用例校准缺陷非服务端问题。
+        check("c3.PARTIAL 小页页数>=3（候选跨页界，页界在我方对象内）", small.pages >= 3,
                 "pages=" + small.pages);
         check("c3.同一条件内连续翻页 token 为纯偏移量数字串",
                 small.ok && small.tokens.stream().allMatch(t -> t.isEmpty() || OFFSET_TOKEN.matcher(t).matches()),
