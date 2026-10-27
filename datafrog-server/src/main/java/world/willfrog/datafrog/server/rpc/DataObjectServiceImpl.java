@@ -178,7 +178,8 @@ public class DataObjectServiceImpl extends DubboDataObjectServiceTriple.DataObje
                     request.getFilterCoverageScopeSubstring(),
                     request.getFilterCoverageStartFrom(),
                     request.getFilterCoverageEndTo(),
-                    request.getFilterFreshnessSince());
+                    request.getFilterFreshnessSince(),
+                    request.getFilterOwner());
             world.willfrog.datafrog.server.objectdata.domain.AssertionStatus statusFilter =
                     statusFilterOf(request.getFilterAssertionStatus());
             DataObjectRegistryService.ListPage page = filters.isEmpty() && statusFilter == null

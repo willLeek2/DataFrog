@@ -278,6 +278,9 @@ message ListDataObjectsRequest {
   string filter_freshness_since = 8;
   // 可用性断言汇总状态（UNKNOWN=不加该条件）。
   AssertionStatus filter_assertion_status = 9;
+  // 对象属主等值过滤（bob 261027 节点 c 裁定）：空=不加该条件，保持 01 原全量分页，其他调用方不受影响；
+  // 主仓库工具路径固定填当前登录用户，不作为任何工具参数暴露给模型。
+  string filter_owner = 10;
 }
 
 message ListDataObjectsResponse {

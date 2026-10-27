@@ -13,10 +13,11 @@ import org.apache.ibatis.annotations.Update;
 @Mapper
 public interface DataObjectMapper {
 
-    /** 枚举过滤条件（014-data-04）：对象行条件三件 + ACTIVE 版本行覆盖条件三件；断言状态过滤不在 SQL。
-     *  全部留空时 rpc 层直接走 listActive（01 纯分页行为不动）。 */
+    /** 枚举过滤条件（014-data-04）：对象行条件四件（含属主等值，bob 节点 c 裁定）+ ACTIVE 版本行
+     *  覆盖条件三件；断言状态过滤不在 SQL。全部留空时 rpc 层直接走 listActive（01 纯分页行为不动）。 */
     record ListFilters(String semanticName, String fieldName, String coverageScopeSubstring,
-                       String coverageStartFrom, String coverageEndTo, String freshnessSince) {
+                       String coverageStartFrom, String coverageEndTo, String freshnessSince,
+                       String owner) {
 
         /** 任一覆盖条件非空时需要 JOIN ACTIVE 版本行下推。 */
         public boolean joinVersion() {
@@ -26,7 +27,7 @@ public interface DataObjectMapper {
         /** 全部条件留空。 */
         public boolean isEmpty() {
             return !notBlank(semanticName) && !notBlank(fieldName) && !notBlank(coverageScopeSubstring)
-                    && !joinVersion();
+                    && !notBlank(owner) && !joinVersion();
         }
 
         private static boolean notBlank(String s) {
@@ -105,6 +106,9 @@ public interface DataObjectMapper {
                 JOIN datafrog_object_version v ON v.object_id = o.id AND v.status = 'ACTIVE'
             </if>
             WHERE o.status = 'ACTIVE'
+            <if test="f.owner != null and f.owner != ''">
+                AND o.owner = #{f.owner}
+            </if>
             <if test="f.semanticName != null and f.semanticName != ''">
                 AND EXISTS (SELECT 1 FROM jsonb_array_elements(o.semantic_refs) r
                     WHERE r-&gt;&gt;'name' LIKE #{f.semanticName} || '%')
@@ -143,6 +147,9 @@ public interface DataObjectMapper {
                 JOIN datafrog_object_version v ON v.object_id = o.id AND v.status = 'ACTIVE'
             </if>
             WHERE o.status = 'ACTIVE'
+            <if test="f.owner != null and f.owner != ''">
+                AND o.owner = #{f.owner}
+            </if>
             <if test="f.semanticName != null and f.semanticName != ''">
                 AND EXISTS (SELECT 1 FROM jsonb_array_elements(o.semantic_refs) r
                     WHERE r-&gt;&gt;'name' LIKE #{f.semanticName} || '%')
