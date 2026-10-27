@@ -105,7 +105,9 @@ public interface DataObjectMapper {
                 o.assertions::text AS "assertionsJson",
                 o.adjustment AS "adjustment", o.ccy AS "ccy", o.current_version AS "currentVersion",
                 o.export_format AS "exportFormat", o.compression AS "compression", o.status AS "status",
-                o.created_at AS "createdAt", o.updated_at AS "updatedAt"
+                o.created_at AS "createdAt", o.updated_at AS "updatedAt",
+                o.retention_days AS "retentionDays", o.version_keep_last AS "versionKeepLast",
+                o.deleted_at AS "deletedAt"
             FROM datafrog_data_object o
             <if test="f.joinVersion">
                 JOIN datafrog_object_version v ON v.object_id = o.id AND v.status = 'ACTIVE'
@@ -186,6 +188,7 @@ public interface DataObjectMapper {
                 semantic_refs::text AS "semanticRefsJson", coverage_scope AS "coverageScope",
                 frequency AS "frequency", gen_method AS "genMethod", gen_task AS "genTask",
                 inputs::text AS "inputsJson", primary_key::text AS "primaryKeyJson",
+                assertions::text AS "assertionsJson",
                 adjustment AS "adjustment", ccy AS "ccy", current_version AS "currentVersion",
                 export_format AS "exportFormat", compression AS "compression", status AS "status",
                 created_at AS "createdAt", updated_at AS "updatedAt",
@@ -206,6 +209,7 @@ public interface DataObjectMapper {
                 semantic_refs::text AS "semanticRefsJson", coverage_scope AS "coverageScope",
                 frequency AS "frequency", gen_method AS "genMethod", gen_task AS "genTask",
                 inputs::text AS "inputsJson", primary_key::text AS "primaryKeyJson",
+                assertions::text AS "assertionsJson",
                 adjustment AS "adjustment", ccy AS "ccy", current_version AS "currentVersion",
                 export_format AS "exportFormat", compression AS "compression", status AS "status",
                 created_at AS "createdAt", updated_at AS "updatedAt",
