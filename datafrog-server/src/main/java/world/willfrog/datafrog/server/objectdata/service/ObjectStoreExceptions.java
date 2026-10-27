@@ -77,4 +77,15 @@ public final class ObjectStoreExceptions {
             super(message);
         }
     }
+
+    /**
+     * 升版基准不符：调用方指定的基准版本与升版事务内读到的当前有效版本不相等
+     * （014-data-05 方案 D1 基准版本守卫的事务内形态，bob 2026-10-27 00c8998c 裁定：
+     * 核对必须与写新版本同一事务，事务外的预读不算核对）。
+     */
+    public static final class ExpectedBaseSupersededException extends RuntimeException {
+        public ExpectedBaseSupersededException(String objectId, int expected, int actual) {
+            super("基准版本已被替代: " + objectId + " 期望 v" + expected + "，当前 v" + actual);
+        }
+    }
 }

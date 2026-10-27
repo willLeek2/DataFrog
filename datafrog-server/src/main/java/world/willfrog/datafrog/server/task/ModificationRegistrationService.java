@@ -24,8 +24,11 @@ import java.util.List;
  * 基准版本守卫取代跨表互斥（bob 必写句）：生成任务的追加与另一次修改可能抢在本次修改
  * 前面把对象推到新版本。登记时校验任务表里落定的基准版本号必须仍是该对象的当前有效
  * 版本；已经不是，任务改判 FAILED_INCOMPLETE（错误信息写明基准版本已被替代），不升版。
- * 对象在修改任务在途期间被删除的场景同样在此拦截：registry.get 取不到 ACTIVE 对象，
- * 登记失败，语义自洽。这样不需要生成任务表与修改任务表之间的跨表互斥。
+ * 守卫的原子形态（bob 2026-10-27 00c8998c 裁定）：核对在升版那一次事务里做
+ * （newVersionFromBase），不在事务外面先读一次就算核对过了——预读到落库之间被人升版
+ * 的窗口、以及并发双登记的第二笔升版，都由事务内核对加版本行主键唯一约束拦住。
+ * 对象在修改任务在途期间被删除的场景同样在升版入口拦截：requireVisible 取不到
+ * ACTIVE 对象，登记失败，语义自洽。这样不需要生成任务表与修改任务表之间的跨表互斥。
  *
  * 登记失败任务标记 FAILED_INCOMPLETE，与 02 的产物入库失败口径一致；结算不动（运行
  * 真实消耗的积分已实结，登记失败不是运行的过错）。终态不回改、如实留痕。
@@ -79,17 +82,12 @@ public class ModificationRegistrationService {
                 return;
             }
 
-            // 基准版本守卫（bob 必写句）：落定的基准版本必须仍是该对象的当前有效版本。
-            DataObjectRegistryService.CardView card = registryService.get(task.getBaseObjectId());
-            int current = card.object().currentVersion();
-            if (current != task.getBaseVersion()) {
-                fail(task, ERR_BASE_SUPERSEDED,
-                        "基准版本已被替代：任务基准 v" + task.getBaseVersion() + "，对象当前 v" + current + "，不升版");
-                return;
-            }
-
-            DataObjectRegistryService.CardView updated = registryService.newVersion(
-                    task.getBaseObjectId(), task.getVersionNote(), overview.minDate(), overview.maxDate(), csv);
+            // 基准版本守卫（事务内形态）：newVersionFromBase 在升版事务里核对任务落定的
+            // 基准版本仍是当前有效版本，不是就不写新版本；对象已删除/不存在在升版入口
+            // 一并拦住（requireVisible）。这里不做事务外的预读核对。
+            DataObjectRegistryService.CardView updated = registryService.newVersionFromBase(
+                    task.getBaseObjectId(), task.getBaseVersion(), task.getVersionNote(),
+                    overview.minDate(), overview.maxDate(), csv);
             int registeredVersion = updated.object().currentVersion();
             int written = taskMapper.updateRegisteredVersion(task.getId(), registeredVersion);
             if (written == 0) {
@@ -106,8 +104,11 @@ public class ModificationRegistrationService {
             //  处实现（方案 D1 方法契约五条）。
         } catch (ObjectStoreExceptions.ObjectNotFoundException e) {
             fail(task, ERR_BASE_SUPERSEDED, "基准对象已不存在或已删除（受理时存在），不升版");
+        } catch (ObjectStoreExceptions.ExpectedBaseSupersededException e) {
+            // 事务内守卫命中：任务落定的基准版本已不是当前有效版本
+            fail(task, ERR_BASE_SUPERSEDED, e.getMessage());
         } catch (ObjectStoreExceptions.DuplicateVersionException | ObjectStoreExceptions.NoActiveVersionException e) {
-            // 守卫检查与升版之间版本被并发顶掉：语义上就是基准版本已被替代
+            // 并发双登记在后提交者撞版本行主键：语义上就是基准版本已被替代
             fail(task, ERR_BASE_SUPERSEDED, "升版时版本冲突（基准版本已被替代）: " + e.getMessage());
         } catch (ObjectStoreExceptions.ConventionViolationException e) {
             fail(task, ERR_PRODUCT_INVALID, "产物内容未过校验: " + e.getMessage());

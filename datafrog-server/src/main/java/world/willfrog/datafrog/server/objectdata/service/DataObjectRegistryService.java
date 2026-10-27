@@ -228,6 +228,62 @@ public class DataObjectRegistryService {
         return get(objectId);
     }
 
+    /**
+     * 修改任务的升版（014-data-05 方案 D1 基准版本守卫的事务内形态，bob 2026-10-27
+     * 00c8998c 裁定）：基准版本核对在升版事务里做——事务内读当前有效版本，与任务落定的
+     * 基准版本不相等就不写新版本（ExpectedBaseSupersededException）；不在事务外预读一遍
+     * 就当核对过了。并发双登记由版本行主键 (object_id, version) 的唯一约束兜底：两个
+     * 事务同基线同时升版，后提交者撞唯一冲突失败，不会出现第二笔升版。
+     *
+     * 与 newVersion 的关系：01 契约的 CreateNewVersion 入口不动（03 与既有调用方照走
+     * newVersion）；本方法只给 05 的修改任务登记段调用，差异仅是多了事务内的基准核对。
+     */
+    public CardView newVersionFromBase(String objectId, int expectedBaseVersion, String versionNote,
+                                       String coverageStart, String coverageEnd, byte[] csvContent) {
+        if (versionNote == null || versionNote.isBlank()) {
+            throw new ObjectStoreExceptions.InvalidArgumentException("升版必须给版本说明（修正或重算，规范篇第 9 节）");
+        }
+        validator.validateCoverage(coverageStart, coverageEnd);
+        DataObjectRow object = requireVisible(objectId);
+        DataObjectVersionRow active = requireActiveVersion(objectId);
+        if (active.version() != expectedBaseVersion) {
+            throw new ObjectStoreExceptions.ExpectedBaseSupersededException(objectId, expectedBaseVersion, active.version());
+        }
+        int newVersionNo = Math.max(object.currentVersion(), active.version()) + 1;
+        if (versionMapper.get(objectId, newVersionNo) != null) {
+            throw new ObjectStoreExceptions.DuplicateVersionException(objectId, newVersionNo);
+        }
+        String contentPath = objectId + "/v" + newVersionNo;
+        ContentStorageService.StoredPart part = contentStore.writePart(contentPath, csvContent);
+        String aggregate = contentStore.contentChecksum(contentPath);
+        long now = System.currentTimeMillis();
+        try {
+            tx.executeWithoutResult(status -> {
+                // 守卫放进事务内：写版本行之前再核对一次当前有效版本仍是基准版本——
+                // 预读（方法开头）到落库之间被人升版的窗口在这里被拦住
+                DataObjectVersionRow current = requireActiveVersion(objectId);
+                if (current.version() != expectedBaseVersion) {
+                    throw new ObjectStoreExceptions.ExpectedBaseSupersededException(
+                            objectId, expectedBaseVersion, current.version());
+                }
+                versionMapper.supersede(objectId, current.version());
+                versionMapper.insert(objectId, newVersionNo, versionNote, current.version(), coverageStart,
+                        contentPath, now);
+                versionMapper.advanceWatermark(objectId, newVersionNo, Jsons.jsonScalar(part.sha256()),
+                        part.rowCount(), coverageEnd, aggregate, now);
+                objectMapper.updateCurrentVersion(objectId, newVersionNo, now);
+                catalogMapper.insert(objectId, CatalogAction.MODIFIED.name(), "system",
+                        "升版 v" + current.version() + "→v" + newVersionNo + "：" + versionNote, now);
+            });
+        } catch (RuntimeException e) {
+            contentStore.deleteVersionDirQuietly(contentPath);
+            throw e;
+        }
+        // 语义索引写入点 MODIFIED（与 newVersion 同一挂点理由）
+        upsertIndexQuietly(objectId, object.name(), object.description(), object.owner(), object.visibility());
+        return get(objectId);
+    }
+
     public void delete(String objectId) {
         requireVisible(objectId);
         long now = System.currentTimeMillis();
