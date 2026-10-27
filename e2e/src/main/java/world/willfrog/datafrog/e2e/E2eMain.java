@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.dubbo.config.ApplicationConfig;
 import org.apache.dubbo.config.ReferenceConfig;
 import org.apache.dubbo.config.bootstrap.DubboBootstrap;
+import org.apache.dubbo.rpc.RpcContext;
 import world.willfrog.datafrog.idl.DataObjectCard;
 import world.willfrog.datafrog.idl.DataObjectService;
 import world.willfrog.datafrog.idl.GetDataObjectRequest;
@@ -63,7 +64,7 @@ public final class E2eMain {
     private static final String API = "/api/data-platform/v1";
 
     private record Config(String host, int rpcPort, int httpPort, Path out, String phase,
-                          String owner, String token, String prefix,
+                          String owner, String token, String prefix, String laneTag,
                           String objectB, String objectBSymbol, String s10Object) {
     }
 
@@ -88,7 +89,7 @@ public final class E2eMain {
         String token = arg(args, "--token", "");
         if (owner.isBlank() || token.isBlank()) {
             System.err.println("用法: --host <host> --rpc-port <port> --http-port <port> "
-                    + "--owner <运行身份> --token <Bearer> --phase 1|1b|3 "
+                    + "--owner <运行身份> --token <Bearer> --phase 1|1b|3 [--lane-tag <泳道 tag>] "
                     + "[--out out] [--prefix e2e05-] [--object-b <id> --object-b-symbol <B 的标的值>] [--s10-object <id>]");
             System.exit(2);
         }
@@ -102,6 +103,7 @@ public final class E2eMain {
                 Path.of(arg(args, "--out", "out")),
                 phase, owner, token,
                 arg(args, "--prefix", "e2e05-"),
+                arg(args, "--lane-tag", ""),
                 arg(args, "--object-b", ""),
                 arg(args, "--object-b-symbol", ""),
                 arg(args, "--s10-object", ""));
@@ -149,6 +151,7 @@ public final class E2eMain {
         section("phase1 环境");
         // 执行段专用语义定义：名字与数据列名一致（e2e05close），挂靠匹配与列匹配两头同串
         String defName = (cfg.prefix() + "close").replaceAll("-", "");
+        laneTag(cfg);
         RegisterSemanticDefinitionResponse regDef = svc.registerSemanticDefinition(
                 RegisterSemanticDefinitionRequest.newBuilder().setName(defName).setVersion(1)
                         .setDisplayName("e2e05 执行段语义").setDefinition("e2e05 条件筛选求值用临时语义定义")
@@ -224,6 +227,7 @@ public final class E2eMain {
         if (cfg.objectB().isBlank()) {
             check("w3.跳过（未给 --object-b）", true, "本 phase 未提供 B 对象 id，如实记录为跳过");
         } else {
+            laneTag(cfg);
             GetDataObjectResponse b = svc.getDataObject(
                     GetDataObjectRequest.newBuilder().setObjectId(cfg.objectB()).build());
             record("get-B", b);
@@ -313,6 +317,7 @@ public final class E2eMain {
         section("w6 D6 保留拒绝");
         RegisterDataObjectRequest.Builder rb = baseRegister(cfg, objName(cfg, "ret"), defName, csv);
         rb.setRetentionDays(30);
+        laneTag(cfg);
         RegisterDataObjectResponse regRet = svc.registerDataObject(rb.build());
         record("register-retention", regRet);
         check("w6.带 retention_days=30 拒绝（RETENTION_POLICY_INVALID）",
@@ -321,6 +326,7 @@ public final class E2eMain {
                 "ok=" + regRet.getResult().getOk()
                         + " code=" + regRet.getResult().getCode());
         RegisterDataObjectRequest.Builder rb0 = baseRegister(cfg, objName(cfg, "ret0"), defName, csv);
+        laneTag(cfg);
         RegisterDataObjectResponse regRet0 = svc.registerDataObject(rb0.build());
         check("w6.不带保留值（0=未设置）登记 ok", regRet0.getResult().getOk(),
                 regRet0.getResult().getMessage());
@@ -352,6 +358,7 @@ public final class E2eMain {
 
         // ── S10 前置记录：把执行段对象 E 的校验和写进证据（phase 3 对比用） ──
         section("S10 前置记录");
+        laneTag(cfg);
         GetDataObjectResponse eCard = svc.getDataObject(
                 GetDataObjectRequest.newBuilder().setObjectId(eId).build());
         evidence.append("[S10-PRE] object=").append(eId)
@@ -492,6 +499,7 @@ public final class E2eMain {
             check("S10.未给 --s10-object，跳过", true, "需要 phase 1 证据 [S10-PRE] 行里的对象 id");
             return;
         }
+        laneTag(cfg);
         GetDataObjectResponse card = svc.getDataObject(
                 GetDataObjectRequest.newBuilder().setObjectId(cfg.s10Object()).build());
         record("s10-card-after-roll", card);
@@ -499,6 +507,7 @@ public final class E2eMain {
         check("S10.滚动后行数不变（8 行）", card.getCard().getRowCount() == 8,
                 "rowCount=" + card.getCard().getRowCount());
         // 读首页字节成功即内容存活；执行段再求值一次做行为级验证（等于最新值仍命中）
+        laneTag(cfg);
         ReadObjectDataResponse firstPage = svc.readObjectData(ReadObjectDataRequest.newBuilder()
                 .setObjectId(cfg.s10Object()).setPageSize(4096).build());
         byte[] head = firstPage.getData().toByteArray();
@@ -578,6 +587,14 @@ public final class E2eMain {
         check(label + "（" + meaning + "）", ok, detail);
     }
 
+
+
+    /** 控制器发布的宿主口按 dubbo.tag 做泳道分流：带 --lane-tag 时每次 rpc 调用前设置。 */
+    private void laneTag(Config cfg) {
+        if (!cfg.laneTag().isBlank()) {
+            RpcContext.getClientAttachment().setAttachment("dubbo.tag", cfg.laneTag());
+        }
+    }
 
     // ── HTTP 基础 ──
 
