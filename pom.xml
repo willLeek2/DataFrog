@@ -40,6 +40,8 @@
     <modules>
         <module>datafrog-api</module>
         <module>datafrog-server</module>
+        <!-- 014-data-05 泳道验收断言程序（仅本分支 cckimi/e2e-014data05；送审分支 cckimi/014-data-05 不含此模块。api 依赖口径见 e2e/pom.xml 注释） -->
+        <module>e2e</module>
     </modules>
 
     <build>

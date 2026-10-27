@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>world.willfrog</groupId>
+  <artifactId>datafrog-014data05-e2e</artifactId>
+  <name>014-data-05 Beta 泳道验收断言程序</name>
+  <version>0.1.0-SNAPSHOT</version>
+  <description>Dubbo tri 直连 + HTTP Bearer 双通道断言：D1 修改任务受理面、D2 语义查询、
+        D3 执行段、D4 列表过滤、D5 删除摘点、D6 保留拒绝、D7 核验记录、D8 导出限额、
+        D9 维护端点，以及 S10 滚动存活实证（phase 3）。run 全链（修改任务拉起真实运行）
+        的 phase 2 待与 wang 协调 run 驱动器后排期，本程序先留骨架。不在 DataFrog 送审分支上。</description>
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.5.1</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <transformers>
+                <transformer>
+                  <mainClass>world.willfrog.datafrog.e2e.E2eMain</mainClass>
+                </transformer>
+              </transformers>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+  <properties>
+    <maven.compiler.target>17</maven.compiler.target>
+    <maven.compiler.source>17</maven.compiler.source>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <dubbo.version>3.3.2</dubbo.version>
+  </properties>
+</project>

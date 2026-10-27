@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>world.willfrog</groupId>
+    <artifactId>datafrog-014data05-e2e</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+    <name>014-data-05 Beta 泳道验收断言程序</name>
+    <description>Dubbo tri 直连 + HTTP Bearer 双通道断言：D1 修改任务受理面、D2 语义查询、
+        D3 执行段、D4 列表过滤、D5 删除摘点、D6 保留拒绝、D7 核验记录、D8 导出限额、
+        D9 维护端点，以及 S10 滚动存活实证（phase 3）。run 全链（修改任务拉起真实运行）
+        的 phase 2 待与 wang 协调 run 驱动器后排期，本程序先留骨架。不在 DataFrog 送审分支上。</description>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <dubbo.version>3.3.2</dubbo.version>
+    </properties>
+
+    <dependencies>
+        <!-- DataFrog 契约（proto 生成 stub）。本分支自 05 送审分支（7986f1f）切出，reactor
+             里 datafrog-api 就是 05 版（retention 字段 21/22 等），可直接 ./mvnw -pl e2e -am
+             package。若在其他分支源码树上构建，须先 install 05 版 api 再独立构建本模块。 -->
+        <dependency>
+            <groupId>world.willfrog</groupId>
+            <artifactId>datafrog-api</artifactId>
+            <version>0.1.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo</artifactId>
+            <version>${dubbo.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.15.4</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>world.willfrog.datafrog.e2e.E2eMain</mainClass>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
