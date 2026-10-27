@@ -266,7 +266,7 @@ message ListDataObjectsRequest {
   // 时间/新鲜度条件经 JOIN 当前 ACTIVE 版本行下推；断言状态过滤在服务层现算滤完再按偏移切页。
   // 数据域：语义定义 name 前缀匹配，命中对象挂靠的 semantic_refs。
   string filter_semantic_name = 3;
-  // 字段：对象挂靠的语义定义的字段集包含该字段名即命中。
+  // 字段：对象挂靠的语义定义 name 等值匹配即命中（语义定义本身就是字段级语义单元，定义表无独立字段列）。
   string filter_field_name = 4;
   // 覆盖范围描述子串。
   string filter_coverage_scope_substring = 5;
