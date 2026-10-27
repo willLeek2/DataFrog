@@ -109,10 +109,12 @@ public class ModificationRegistrationService {
             // 「基准版本已被替代」这个码（bob 2026-10-27 47e8ee5e 纠正口径）
             fail(task, ERR_BASE_SUPERSEDED, e.getMessage());
         } catch (ObjectStoreExceptions.DuplicateVersionException e) {
-            // 并发双登记的后提交者撞版本行主键、回滚，第二笔版本不会留下：事实是
-            // 「后提交的升版被主键挡下并回滚」，记产物登记失败，不写成基准版本已被替代
-            fail(task, ERR_REGISTRATION_FAILED,
-                    "产物登记失败: 并发升版撞版本行主键（后提交的升版被挡下并回滚）: " + e.getMessage());
+            // 升版前预查发现目标版本号已存在（对方事务已提交后预查才跑到）：记产物登记失败，
+            // 不写成基准版本已被替代。真正在 INSERT 时撞数据库主键的那一笔不会走到本分支——
+            // 它以 Spring 的 DuplicateKeyException 形态落进最外层通用异常分支，错误码同为
+            // MODIFICATION_REGISTRATION_FAILED、正文是数据库原文加「产物登记失败:」前缀
+            // （bob 2026-10-27 9db0e12f 核实的事实，行为两路一致无需再改）
+            fail(task, ERR_REGISTRATION_FAILED, "产物登记失败: 升版目标版本号已存在: " + e.getMessage());
         } catch (ObjectStoreExceptions.NoActiveVersionException e) {
             // 正常流程不会走到（升版的封存与插入在同一事务）；走到就是对象状态异常，如实记
             fail(task, ERR_REGISTRATION_FAILED, "产物登记失败: 对象没有当前生效版本: " + e.getMessage());
