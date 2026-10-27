@@ -1,0 +1,14 @@
+{
+  "_说明": "014-data-06 运行时热配置示例。本文件由 NacosConfigBridge 把 Nacos 订阅 datafrog-runtime.json 写盘生成（部署环境经 DATAFROG_RUNTIME_CONFIG_FILE 指定路径），也可手工放置调试。所有键都可缺省：键不出现 = 该项回退环境变量默认值。字符串值支持 ${ENV_NAME} 占位符。",
+  "_authPassthroughUserId": "登录态直通用户标识（014-data-02 过渡配置的热值）。写了本键（含空串）即覆盖环境变量 DATAFROG_AUTH_PASSTHROUGH_USER_ID；空串 = 一切登录态判无效。",
+  "authPassthroughUserId": "beta-acceptance-user",
+  "_qdrant": "以下三键覆盖环境变量 DATAFROG_QDRANT_HOST / DATAFROG_QDRANT_PORT / DATAFROG_QDRANT_COLLECTION。",
+  "qdrantHost": "shared-qdrant",
+  "qdrantPort": 6334,
+  "qdrantCollection": "datafrog_objects",
+  "_embedding": "以下四键覆盖环境变量 DATAFROG_EMBEDDING_BASE_URL / DATAFROG_EMBEDDING_API_KEY / DATAFROG_EMBEDDING_MODEL / DATAFROG_EMBEDDING_DIM。密钥建议用 ${ENV} 占位符，不明文进 Nacos。",
+  "embeddingBaseUrl": "https://api.openai.com/v1",
+  "embeddingApiKey": "${DATAFROG_EMBEDDING_API_KEY}",
+  "embeddingModel": "text-embedding-3-small",
+  "embeddingDim": 1024
+}

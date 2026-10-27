@@ -4,7 +4,7 @@ import java.time.OffsetDateTime;
 
 /**
  * 生成任务表 datafrog_generation_task 的实体映射（014-data-02）。
- * 字段语义以 db/datafrog_generation_task.sql 的列注释为准。
+ * 字段语义以 db/datafrog-generation-task-v1.sql 的列注释为准。
  */
 public class GenerationTaskEntity {
 

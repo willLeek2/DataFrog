@@ -55,8 +55,10 @@ import java.util.Locale;
 @Service
 public class DataObjectServiceImpl extends DubboDataObjectServiceTriple.DataObjectServiceImplBase {
 
-    private static final int DEFAULT_PAGE_SIZE = 20;
-    private static final int MAX_PAGE_SIZE = 200;
+    /** 缺省页大小（httpapi 引用的单一来源）。 */
+    public static final int DEFAULT_PAGE_SIZE = 20;
+    /** 页大小上限（httpapi 引用的单一来源）。 */
+    public static final int MAX_PAGE_SIZE = 200;
 
     private final DataObjectRegistryService registry;
     private final SemanticDefinitionService definitions;

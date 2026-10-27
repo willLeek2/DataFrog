@@ -48,6 +48,12 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.13.0</version>
+                <configuration>
+                    <!-- Spring 6.1 起不再回退用反射猜参数名：@RequestParam/@PathVariable
+                         不写显式名时靠编译进 class 文件的参数名元数据解析，不开本标志
+                         运行时一律 500（014-data-06 节点 d 验收实证）。主仓库同款配置。 -->
+                    <parameters>true</parameters>
+                </configuration>
             </plugin>
             <!-- 固定 Surefire 版本：Maven 3.6 系的默认 Surefire 2.12.4 走 JUnit 3 提供器，
                  会静默跳过 JUnit 5 测试（BUILD SUCCESS 但 Tests run: 0）。固定为 3.5.2 后

@@ -174,6 +174,15 @@ public class ContentStorageService {
     }
 
     /**
+     * 导出目录公式（纯计算零副作用）：数据根/&lt;objectId&gt;/export/v&lt;version&gt;。
+     * 导出写入（exportCsv）与 HTTP 下载通道（httpapi.ExportFileSupport）共用这一个公式来源，
+     * 目录拼法只在这里维护。
+     */
+    public Path exportDirOf(String objectId, int version) {
+        return Path.of(dataRoot, objectId, "export", "v" + version);
+    }
+
+    /**
      * 第 10 节导出。同一对象同一版本重复导出覆盖同一目录（先清空再写）。
      */
     public ExportResult exportCsv(String objectId, int version, String contentPath,
@@ -187,7 +196,7 @@ public class ContentStorageService {
         if (parts.isEmpty()) {
             throw new ConventionViolationException("该版本没有内容 part，无法导出");
         }
-        Path exportDir = Path.of(dataRoot, objectId, "export", "v" + version);
+        Path exportDir = exportDirOf(objectId, version);
         try {
             prepareCleanDir(exportDir);
         } catch (IOException e) {

@@ -32,7 +32,7 @@ public class GenerationTaskSchemaGuard implements ApplicationRunner {
         } catch (Exception e) {
             throw new IllegalStateException(
                     "table datafrog_generation_task missing or unreadable; "
-                            + "execute datafrog-server/src/main/resources/db/datafrog_generation_task.sql before deployment",
+                            + "execute datafrog-server/src/main/resources/db/datafrog-generation-task-v1.sql before deployment",
                     e);
         }
         log.info("schema guard passed: datafrog_generation_task present");
