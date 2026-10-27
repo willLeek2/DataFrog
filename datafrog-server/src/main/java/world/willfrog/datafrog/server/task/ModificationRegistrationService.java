@@ -105,11 +105,17 @@ public class ModificationRegistrationService {
         } catch (ObjectStoreExceptions.ObjectNotFoundException e) {
             fail(task, ERR_BASE_SUPERSEDED, "基准对象已不存在或已删除（受理时存在），不升版");
         } catch (ObjectStoreExceptions.ExpectedBaseSupersededException e) {
-            // 事务内守卫命中：任务落定的基准版本已不是当前有效版本
+            // 事务内守卫命中：任务落定的基准版本已不是当前有效版本——只有这一路用
+            // 「基准版本已被替代」这个码（bob 2026-10-27 47e8ee5e 纠正口径）
             fail(task, ERR_BASE_SUPERSEDED, e.getMessage());
-        } catch (ObjectStoreExceptions.DuplicateVersionException | ObjectStoreExceptions.NoActiveVersionException e) {
-            // 并发双登记在后提交者撞版本行主键：语义上就是基准版本已被替代
-            fail(task, ERR_BASE_SUPERSEDED, "升版时版本冲突（基准版本已被替代）: " + e.getMessage());
+        } catch (ObjectStoreExceptions.DuplicateVersionException e) {
+            // 并发双登记的后提交者撞版本行主键、回滚，第二笔版本不会留下：事实是
+            // 「后提交的升版被主键挡下并回滚」，记产物登记失败，不写成基准版本已被替代
+            fail(task, ERR_REGISTRATION_FAILED,
+                    "产物登记失败: 并发升版撞版本行主键（后提交的升版被挡下并回滚）: " + e.getMessage());
+        } catch (ObjectStoreExceptions.NoActiveVersionException e) {
+            // 正常流程不会走到（升版的封存与插入在同一事务）；走到就是对象状态异常，如实记
+            fail(task, ERR_REGISTRATION_FAILED, "产物登记失败: 对象没有当前生效版本: " + e.getMessage());
         } catch (ObjectStoreExceptions.ConventionViolationException e) {
             fail(task, ERR_PRODUCT_INVALID, "产物内容未过校验: " + e.getMessage());
         } catch (Exception e) {
