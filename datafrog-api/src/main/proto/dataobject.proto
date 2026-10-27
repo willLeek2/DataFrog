@@ -1,0 +1,304 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+
+package world.willfrog.datafrog.idl;
+
+// 014-data-01 数据对象存储模块的对外契约。业务流量全走 Dubbo（骨架阶段不引入 web 依赖，
+// HTTP 入口与鉴权归 014-data-06 的对外接口层）。
+// 业务失败不用异常表达：所有应答携带 ResultInfo，失败时给可机读错误码（架构篇对外接口节口径）。
+// 字段口径对应《数据规范与约定》：交易日=东八区零点毫秒、事件时刻=UTC 毫秒、
+// 覆盖区间=YYYY-MM-DD、id=ds_ 加 8 位十六进制、语义定义=sd_ 加名称加 _v 加整数。
+service DataObjectService {
+  // 首次登记：挂靠校验→约定校验→内容落盘（Parquet part）→对象行+版本 1 行+台账 REGISTERED。
+  rpc RegisterDataObject(RegisterDataObjectRequest) returns (RegisterDataObjectResponse);
+  // 同版本追加：新 Parquet part+水位三件推进（row_count、coverage_end、汇总 checksum），不升版。
+  rpc AppendToObject(AppendToObjectRequest) returns (AppendToObjectResponse);
+  // 修正升版：新版本行 ACTIVE、旧行 SUPERSEDED、台账 MODIFIED；旧版本字段组与 part 集合从此定格。
+  rpc CreateNewVersion(CreateNewVersionRequest) returns (CreateNewVersionResponse);
+  // 软删：台账 DELETED、对象标记不可见；物理清理等保留策略任务（本波不定义）。
+  rpc DeleteDataObject(DeleteDataObjectRequest) returns (DeleteDataObjectResponse);
+  // 读取登记卡；水位与覆盖字段为当前 ACTIVE 版本行的读取时投影。
+  rpc GetDataObject(GetDataObjectRequest) returns (GetDataObjectResponse);
+  // 纯分页枚举；按数据域、字段、时间的过滤归 014-data-04 的完整查询面。
+  rpc ListDataObjects(ListDataObjectsRequest) returns (ListDataObjectsResponse);
+  // 语义定义登记：name+version 唯一，重复注册返回 DEFINITION_ALREADY_EXISTS。
+  rpc RegisterSemanticDefinition(RegisterSemanticDefinitionRequest) returns (RegisterSemanticDefinitionResponse);
+  rpc GetSemanticDefinition(GetSemanticDefinitionRequest) returns (GetSemanticDefinitionResponse);
+  rpc ListSemanticDefinitions(ListSemanticDefinitionsRequest) returns (ListSemanticDefinitionsResponse);
+  // 导出：服务端按规范篇第 10 节落导出文件（分片与 zip 按声明配置），应答只回分片清单不回文件字节。
+  rpc ExportDataObject(ExportDataObjectRequest) returns (ExportDataObjectResponse);
+}
+
+// 业务结果信封：ok=false 时 code 与 message 必填；ok=true 时忽略后两者。
+message ResultInfo {
+  bool ok = 1;
+  ErrorCode code = 2;
+  string message = 3;
+}
+
+enum ErrorCode {
+  OK = 0;
+  // 挂靠的语义定义不存在（生成与修改必须挂靠已有定义）。
+  SEMANTIC_REF_NOT_FOUND = 1;
+  OBJECT_NOT_FOUND = 2;
+  DUPLICATE_VERSION = 3;
+  NO_ACTIVE_VERSION = 4;
+  // 登记内容或声明违反《数据规范与约定》的某条已定约定。
+  INVALID_CONVENTION = 5;
+  DEFINITION_ALREADY_EXISTS = 6;
+  // 元数据表未就位（初始加载器查表缺失即启动失败，此码用于运行期同类情形）。
+  TABLES_NOT_READY = 7;
+  INVALID_ARGUMENT = 8;
+  INTERNAL = 9;
+}
+
+enum SourceType {
+  SOURCE_UNKNOWN = 0;
+  // 系统生产：平台自己跑的通道（抓取、指标计算），按通道管理。
+  SYSTEM = 1;
+  // 用户生成：用户和 Agent 产出的数据，按 credit 记到人。
+  USER = 2;
+}
+
+enum GenMethod {
+  GEN_METHOD_UNKNOWN = 0;
+  FETCH = 1;
+  INDICATOR = 2;
+  AGENT = 3;
+}
+
+enum Frequency {
+  FREQUENCY_UNKNOWN = 0;
+  DAILY = 1;
+  SINGLE_PERIOD = 2;
+}
+
+enum Adjustment {
+  ADJUSTMENT_UNKNOWN = 0;
+  RAW = 1;
+  QFQ = 2;
+  HFQ = 3;
+}
+
+enum Ccy {
+  CCY_UNKNOWN = 0;
+  CNY = 1;
+  HKD = 2;
+  USD = 3;
+}
+
+enum Visibility {
+  VISIBILITY_UNKNOWN = 0;
+  PRIVATE = 1;
+  OWNER_VISIBLE = 2;
+}
+
+enum DefinitionStatus {
+  DEFINITION_STATUS_UNKNOWN = 0;
+  ACTIVE = 1;
+  SUPERSEDED = 2;
+}
+
+// 语义定义引用：sd_<name>_v<version>，如 sd_price_hfq_v1。
+message SemanticRef {
+  string name = 1;
+  int32 version = 2;
+}
+
+// 登记卡。声明类字段登记时写入；row_count、coverage_start、coverage_end、content_checksum
+// 是当前 ACTIVE 版本行的读取时投影（不落对象行，杜绝双源）。
+// shard_count 不在卡上：它是单次导出按第 10 节单文件上限现算的结果，只出现在导出应答里。
+message DataObjectCard {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  SourceType source_type = 4;
+  string owner = 5;
+  Visibility visibility = 6;
+  repeated SemanticRef semantic_refs = 7;
+  string coverage_scope = 8;
+  Frequency frequency = 9;
+  GenMethod gen_method = 10;
+  string gen_task = 11;
+  repeated string inputs = 12;
+  repeated string primary_key = 13;
+  Adjustment adjustment = 14;
+  Ccy ccy = 15;
+  int32 current_version = 16;
+  // 声明的导出配置两键（shard_count 不落任何表，见上）。
+  string export_format = 17;
+  string compression = 18;
+  int64 created_at = 19;
+  int64 updated_at = 20;
+  // 以下为 ACTIVE 版本行投影。
+  int64 row_count = 21;
+  string coverage_start = 22;
+  string coverage_end = 23;
+  string content_checksum = 24;
+}
+
+message SemanticDefinitionCard {
+  string name = 1;
+  string display_name = 2;
+  // 自然语言定义：这组数是什么、怎么算出来的。
+  string definition = 3;
+  // 计算方式（口径模板或公式描述）。
+  string calculation = 4;
+  string unit = 5;
+  // 适用范围。
+  string scope = 6;
+  int32 version = 7;
+  DefinitionStatus status = 8;
+  // 迁移自 01304 方法目录，还是平台手工登记。
+  string origin = 9;
+  int64 created_at = 10;
+}
+
+message RegisterDataObjectRequest {
+  string name = 1;
+  string description = 2;
+  SourceType source_type = 3;
+  string owner = 4;
+  Visibility visibility = 5;
+  repeated SemanticRef semantic_refs = 6;
+  string coverage_scope = 7;
+  Frequency frequency = 8;
+  GenMethod gen_method = 9;
+  string gen_task = 10;
+  repeated string inputs = 11;
+  repeated string primary_key = 12;
+  Adjustment adjustment = 13;
+  Ccy ccy = 14;
+  string export_format = 15;
+  string compression = 16;
+  // 首个版本的覆盖区间（YYYY-MM-DD；单期对象两端同日）。
+  string coverage_start = 17;
+  string coverage_end = 18;
+  // 首个版本的内容，UTF-8 CSV 文本（首行表头，规范篇第 10 节口径）。
+  bytes csv_content = 19;
+}
+
+message RegisterDataObjectResponse {
+  ResultInfo result = 1;
+  DataObjectCard card = 2;
+}
+
+message AppendToObjectRequest {
+  string object_id = 1;
+  // 追加内容，UTF-8 CSV 文本，列结构与登记时一致。
+  bytes csv_content = 2;
+  // 追加说明（写入台账 APPENDED 行的摘要，可空）。
+  string note = 3;
+}
+
+message AppendToObjectResponse {
+  ResultInfo result = 1;
+  // 追加后的登记卡（投影水位已推进）。
+  DataObjectCard card = 2;
+}
+
+message CreateNewVersionRequest {
+  string object_id = 1;
+  // 版本三件套之一：本次升版事由须为修正或重算，日常追加不升版。
+  string version_note = 2;
+  string coverage_start = 3;
+  string coverage_end = 4;
+  // 新版本全量内容（新版本是完整快照，不是增量）。
+  bytes csv_content = 5;
+}
+
+message CreateNewVersionResponse {
+  ResultInfo result = 1;
+  DataObjectCard card = 2;
+}
+
+message DeleteDataObjectRequest {
+  string object_id = 1;
+}
+
+message DeleteDataObjectResponse {
+  ResultInfo result = 1;
+}
+
+message GetDataObjectRequest {
+  string object_id = 1;
+}
+
+message GetDataObjectResponse {
+  ResultInfo result = 1;
+  DataObjectCard card = 2;
+}
+
+message ListDataObjectsRequest {
+  int32 page_size = 1;
+  // 分页游标：首页留空，后续传上页应答的 next_page_token。
+  string page_token = 2;
+}
+
+message ListDataObjectsResponse {
+  ResultInfo result = 1;
+  repeated DataObjectCard cards = 2;
+  string next_page_token = 3;
+}
+
+message RegisterSemanticDefinitionRequest {
+  string name = 1;
+  string display_name = 2;
+  string definition = 3;
+  string calculation = 4;
+  string unit = 5;
+  string scope = 6;
+  int32 version = 7;
+}
+
+message RegisterSemanticDefinitionResponse {
+  ResultInfo result = 1;
+  SemanticDefinitionCard card = 2;
+}
+
+message GetSemanticDefinitionRequest {
+  string name = 1;
+  int32 version = 2;
+}
+
+message GetSemanticDefinitionResponse {
+  ResultInfo result = 1;
+  SemanticDefinitionCard card = 2;
+}
+
+message ListSemanticDefinitionsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListSemanticDefinitionsResponse {
+  ResultInfo result = 1;
+  repeated SemanticDefinitionCard cards = 2;
+  string next_page_token = 3;
+}
+
+message ExportDataObjectRequest {
+  string object_id = 1;
+  // 0 表示当前 ACTIVE 版本。
+  int32 version = 2;
+}
+
+// 单个导出分片的清单项（文件本身留在服务端导出目录，由调用方按环境取）。
+message ExportShard {
+  string file_name = 1;
+  int64 byte_size = 2;
+  string sha256 = 3;
+}
+
+message ExportDataObjectResponse {
+  ResultInfo result = 1;
+  // 本次导出实际拆成的片数（按第 10 节单文件上限现算，不落登记卡）。
+  int32 shard_count = 2;
+  repeated ExportShard shards = 3;
+  // 导出内容整体的 sha256：导出分片按文件名升序拼接后计算。与版本行 content_checksum
+  // （Parquet 分片同公式）是两个数——公式相同、文件集不同，不必相等（bob 261026 裁定）。
+  string aggregate_checksum = 4;
+  // 导出目录（服务端数据根下的相对路径）；同一对象同一版本重复导出时覆盖此目录，不另起一份。
+  string export_dir = 5;
+}

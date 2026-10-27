@@ -1,14 +1,20 @@
 spring:
   application:
     name: datafrog-server
+  # PostgreSQL 数据源（014-data-01 数据对象存储模块启用；环境变量由部署环境注入，
+  # 形态与 alphafrog 各业务服务一致）。元数据建表脚本 db/datafrog-objectstore-v1.sql
+  # 由部署链路在进程启动前执行，进程启动时 InitialDefinitionLoader 查表缺失即失败（fail-closed）。
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}
+    username: ${AF_DB_MAIN_USER}
+    password: ${AF_DB_MAIN_PASSWORD}
 
-# 预留：PostgreSQL 数据源。启用时同步取消 datafrog-server/pom.xml 中 mybatis 与 postgresql 依赖的注释，
-# 形态与 alphafrog 各业务服务一致（环境变量由部署环境注入）。
-#   datasource:
-#     driver-class-name: org.postgresql.Driver
-#     url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}
-#     username: ${AF_DB_MAIN_USER}
-#     password: ${AF_DB_MAIN_PASSWORD}
+# 014-data-01 数据对象存储：内容（Parquet part 与导出文件）的数据根目录，
+# 相对路径按进程工作目录解析，生产由部署环境注入绝对路径。
+datafrog:
+  objectstore:
+    data-root: ${DATAFROG_OBJECTSTORE_DATA_ROOT:data/objectstore}
 
 # 预留：Redis。启用时同步取消 pom.xml 中 spring-boot-starter-data-redis 的注释。
 #   data:
