@@ -13,6 +13,8 @@ import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentArtifactsRequest;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentArtifactsResponse;
 
 import java.util.List;
 
@@ -85,11 +87,12 @@ public class AgentRunClient {
      * 而不是塞在 GetResult 的 answer 文本里（文本通道不保证完整，文件通道才是契约产物）。
      */
     public List<AgentArtifactMessage> listRunArtifacts(String userId, String runId) {
-        ListAgentArtifactsRequest request = ListAgentArtifactsRequest.newBuilder()
-                .setUserId(userId)
-                .setId(runId)
-                .build();
-        return agentDubboService.listArtifacts(request).getItemsList();
+        ListAgentArtifactsResponse response = agentDubboService.listArtifacts(
+                ListAgentArtifactsRequest.newBuilder()
+                        .setUserId(userId)
+                        .setId(runId)
+                        .build());
+        return response.getItemsList();
     }
 
     /** 下载一份产物附件的完整内容。 */

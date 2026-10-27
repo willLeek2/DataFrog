@@ -246,7 +246,8 @@ public class RetentionSweeper {
     private boolean pointExists(String objectId) throws Exception {
         QdrantClient client = qdrantClientProvider.get();
         UUID pointUuid = UUID.nameUUIDFromBytes(objectId.getBytes(StandardCharsets.UTF_8));
-        return !client.retrieveAsync(semanticIndexSettings.getCollection(), List.of(id(pointUuid)), false, false)
+        // ReadConsistency 传 null=用集合默认一致性级别（客户端对该参数按可空处理）
+        return !client.retrieveAsync(semanticIndexSettings.getCollection(), List.of(id(pointUuid)), false, false, null)
                 .get(5, TimeUnit.SECONDS)
                 .isEmpty();
     }

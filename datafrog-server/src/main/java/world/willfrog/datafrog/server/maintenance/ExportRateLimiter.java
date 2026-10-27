@@ -47,7 +47,7 @@ public class ExportRateLimiter {
      */
     public void tryAcquire(String userId, String objectId) {
         long now = System.currentTimeMillis();
-        long last = ledgerMapper.lastExportedAt(userId, objectId);
+        Long last = ledgerMapper.lastExportedAt(userId, objectId);
         int cooldownSeconds = cooldownSeconds();
         if (last != null && now - last < cooldownSeconds * 1000L) {
             long waitSeconds = (cooldownSeconds * 1000L - (now - last) + 999) / 1000;

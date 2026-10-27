@@ -124,7 +124,7 @@ public class ModificationTaskServiceImpl {
         String userId = auth.getUserId();
 
         // 规格解析校验：02 的键全量沿用，另加 base_object_id / base_version / version_note 三键。
-        if (request.getClientRequestId() == null || request.getClientRequestId().isBlank()) {
+        if (request.clientRequestId() == null || request.clientRequestId().isBlank()) {
             return createError(ERR_INVALID_SPEC, "client_request_id is blank");
         }
         Struct spec;
