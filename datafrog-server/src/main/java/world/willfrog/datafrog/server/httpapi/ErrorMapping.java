@@ -68,6 +68,31 @@ public class ErrorMapping {
         return new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", detail);
     }
 
+    /**
+     * 05 修改任务应答映射（014-data-05 方案 D12）：码值空间与 fromTaskErrorCode 分开维护——
+     * 同型错误（未认证、余额、规格、拉起/运行失败、超时）沿用 02 的外码与状态；05 新增的
+     * MODIFICATION_TARGET_NOT_FOUND / MODIFICATION_IN_PROGRESS 与平台的 FORBIDDEN_VISIBILITY
+     * 按方案映射表落。任务终态自身的 error_code 不经过这里（任务资源本体信息，控制器原样透出）。
+     */
+    public ApiException fromModificationTaskErrorCode(String errorCode, String message) {
+        String detail = message == null ? "" : message;
+        return switch (errorCode) {
+            case "TASK_NOT_FOUND" -> new ApiException(HttpStatus.NOT_FOUND, "TASK_NOT_FOUND", detail);
+            case "UNAUTHENTICATED" -> new ApiException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", detail);
+            case "CREDIT_INSUFFICIENT" -> new ApiException(HttpStatus.PAYMENT_REQUIRED, "INSUFFICIENT_CREDITS", detail);
+            case "INVALID_SPEC" -> new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", detail);
+            case "MODIFICATION_TARGET_NOT_FOUND" -> new ApiException(HttpStatus.NOT_FOUND,
+                    "MODIFICATION_TARGET_NOT_FOUND", detail);
+            case "FORBIDDEN_VISIBILITY" -> new ApiException(HttpStatus.FORBIDDEN, "FORBIDDEN_VISIBILITY", detail);
+            case "MODIFICATION_IN_PROGRESS" -> new ApiException(HttpStatus.CONFLICT, "MODIFICATION_IN_PROGRESS", detail);
+            case "MODIFICATION_LAUNCH_FAILED" -> new ApiException(HttpStatus.BAD_GATEWAY, "RUN_LAUNCH_FAILED", detail);
+            case "MODIFICATION_RUN_FAILED" -> new ApiException(HttpStatus.BAD_GATEWAY, "RUN_FAILED", detail);
+            case "MODIFICATION_TASK_TIMEOUT" -> new ApiException(HttpStatus.CONFLICT, "TASK_TIMEOUT", detail);
+            case "INTERNAL" -> internal();
+            default -> unknown("modification-task", errorCode);
+        };
+    }
+
     /** INTERNAL 一律不透出内部说明，避免把下层异常文本泄漏给外部调用方。 */
     private static ApiException internal() {
         return new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL", "内部错误");

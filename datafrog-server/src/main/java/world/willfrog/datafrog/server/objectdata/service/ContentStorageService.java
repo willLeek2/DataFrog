@@ -203,6 +203,41 @@ public class ContentStorageService {
     }
 
     /**
+     * 修改任务登记段的三样最小校验（014-data-05 方案 D1）共用的一次性体检：
+     * ① CSV 能否解析（解析失败抛 ConventionViolationException）；② 是否含日期样列
+     * （dateColumns 为空即不含）；③ 覆盖起止能否算出（minDate/maxDate）。
+     * 日期样列的判定与追加路径推进覆盖日期用的是同一套抽样逻辑，两处口径不分开维护。
+     */
+    public record CsvDateOverview(long rowCount, List<String> dateColumns, String minDate, String maxDate) {
+    }
+
+    public CsvDateOverview inspectCsvDates(byte[] csvContent) {
+        Path csvTemp = writeTempCsv(csvContent);
+        try (Connection conn = duckdb()) {
+            String relation = readCsv(csvTemp);
+            long rows = queryLong(conn, "SELECT count(*) FROM " + relation);
+            List<String> dateColumns = dateLikeColumns(conn, relation);
+            String min = null;
+            String max = null;
+            for (String col : dateColumns) {
+                String lo = queryString(conn, "SELECT min(try_cast(" + ident(col) + " AS DATE))::VARCHAR FROM " + relation);
+                String hi = queryString(conn, "SELECT max(try_cast(" + ident(col) + " AS DATE))::VARCHAR FROM " + relation);
+                if (lo != null && (min == null || lo.compareTo(min) < 0)) {
+                    min = lo;
+                }
+                if (hi != null && (max == null || hi.compareTo(max) > 0)) {
+                    max = hi;
+                }
+            }
+            return new CsvDateOverview(rows, dateColumns, min, max);
+        } catch (SQLException e) {
+            throw new ConventionViolationException("CSV 内容无法解析: " + e.getMessage());
+        } finally {
+            deleteQuietly(csvTemp);
+        }
+    }
+
+    /**
      * 导出目录公式（纯计算零副作用）：数据根/&lt;objectId&gt;/export/v&lt;version&gt;。
      * 导出写入（exportCsv）与 HTTP 下载通道（httpapi.ExportFileSupport）共用这一个公式来源，
      * 目录拼法只在这里维护。

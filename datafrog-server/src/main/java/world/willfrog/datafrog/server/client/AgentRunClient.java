@@ -2,14 +2,19 @@ package world.willfrog.datafrog.server.client;
 
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.stereotype.Component;
+import world.willfrog.alphafrogmicro.agent.idl.AgentArtifactMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentDubboService;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunStatusMessage;
 import world.willfrog.alphafrogmicro.agent.idl.CancelAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.CreateAgentRunRequest;
+import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactRequest;
+import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
+
+import java.util.List;
 
 /**
  * 主仓库 Agent 运行体系的 Dubbo 客户端（014-data-02）。
@@ -72,5 +77,28 @@ public class AgentRunClient {
         GetAgentCreditsResponse response = agentDubboService.getCredits(
                 GetAgentCreditsRequest.newBuilder().setUserId(userId).build());
         return response.getRemainingCredits();
+    }
+
+    /**
+     * 列出一次运行的产物附件清单（014-data-05 登记段取回运行产出的 CSV 用）。
+     * 06 交付的 Agent 运行结果读取面：产物文件经 ListArtifacts + DownloadArtifact 取回，
+     * 而不是塞在 GetResult 的 answer 文本里（文本通道不保证完整，文件通道才是契约产物）。
+     */
+    public List<AgentArtifactMessage> listRunArtifacts(String userId, String runId) {
+        ListAgentArtifactsRequest request = ListAgentArtifactsRequest.newBuilder()
+                .setUserId(userId)
+                .setId(runId)
+                .build();
+        return agentDubboService.listArtifacts(request).getItemsList();
+    }
+
+    /** 下载一份产物附件的完整内容。 */
+    public byte[] downloadArtifact(String userId, String artifactId) {
+        DownloadAgentArtifactResponse response = agentDubboService.downloadArtifact(
+                DownloadAgentArtifactRequest.newBuilder()
+                        .setUserId(userId)
+                        .setArtifactId(artifactId)
+                        .build());
+        return response.getContent().toByteArray();
     }
 }
