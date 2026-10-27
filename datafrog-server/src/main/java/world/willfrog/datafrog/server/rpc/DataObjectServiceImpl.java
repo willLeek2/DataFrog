@@ -438,16 +438,32 @@ public class DataObjectServiceImpl extends DubboDataObjectServiceTriple.DataObje
         return v == SourceType.SOURCE_UNKNOWN ? null : v.name().toLowerCase(Locale.ROOT);
     }
 
+    // 014-data-04 泳道实测修：枚举声明字段（visibility/frequency/gen_method）在库里全部 NOT NULL，
+    // 此前未声明（proto3 默认 UNKNOWN）映射成 null 一路进 INSERT，炸成 INTERNAL+SQL 原文——
+    // 调用方既拿不到可读错误码，也不知道缺了哪个声明。改成 fail-closed：未声明按约定违例拒绝，
+    // 错误信息点名缺的字段与词表（规范篇第 14 节）。
     private static String visValue(Visibility v) {
-        return v == Visibility.VISIBILITY_UNKNOWN ? null : v.name().toLowerCase(Locale.ROOT);
+        if (v == Visibility.VISIBILITY_UNKNOWN) {
+            throw new ObjectStoreExceptions.ConventionViolationException(
+                    "visibility 未声明（词表：private | owner_visible，见规范篇第 14 节）");
+        }
+        return v.name().toLowerCase(Locale.ROOT);
     }
 
     private static String freqValue(Frequency v) {
-        return v == Frequency.FREQUENCY_UNKNOWN ? null : v.name().toLowerCase(Locale.ROOT);
+        if (v == Frequency.FREQUENCY_UNKNOWN) {
+            throw new ObjectStoreExceptions.ConventionViolationException(
+                    "frequency 未声明（词表：daily | single_period，见规范篇第 14 节）");
+        }
+        return v.name().toLowerCase(Locale.ROOT);
     }
 
     private static String genValue(GenMethod v) {
-        return v == GenMethod.GEN_METHOD_UNKNOWN ? null : v.name().toLowerCase(Locale.ROOT);
+        if (v == GenMethod.GEN_METHOD_UNKNOWN) {
+            throw new ObjectStoreExceptions.ConventionViolationException(
+                    "gen_method 未声明（词表：fetch | indicator | agent，见规范篇第 14 节）");
+        }
+        return v.name().toLowerCase(Locale.ROOT);
     }
 
     private static String adjValue(Adjustment v) {
