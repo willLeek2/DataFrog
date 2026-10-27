@@ -293,7 +293,7 @@ public class ContentStorageService {
                 Path partFile = tmpDir.resolve(String.format("part-%06d.parquet", i + 1));
                 Files.write(partFile, partsInOrder.get(i));
                 String source = "read_parquet(" + sqlString(partFile) + ")";
-                List<String> columns = columnNames(conn, source);
+                List<String> columns = columnNames(conn, "SELECT * FROM " + source);
                 if (header == null) {
                     header = columns;
                 } else if (!header.equals(columns)) {
