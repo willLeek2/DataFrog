@@ -173,6 +173,35 @@ public class ContentStorageService {
         }
     }
 
+    /** 版本目录内全部 part 文件名，按文件名升序（与 content_checksum 的拼接定义同序）。 */
+    public List<String> listPartFileNames(String contentPath) {
+        List<String> names = new ArrayList<>();
+        for (Path p : listParquetFiles(versionDir(contentPath))) {
+            names.add(p.getFileName().toString());
+        }
+        return names;
+    }
+
+    /** 单个 part 的字节长度。 */
+    public long partSize(String contentPath, String partFile) {
+        try {
+            return Files.size(versionDir(contentPath).resolve(partFile));
+        } catch (IOException e) {
+            throw new IllegalStateException("读取 part 长度失败: " + partFile, e);
+        }
+    }
+
+    /** 读单个 part 自 offset 起的至多 length 字节（ReadObjectData 用；只读不写）。 */
+    public byte[] readPartRange(String contentPath, String partFile, long offset, int length) {
+        Path part = versionDir(contentPath).resolve(partFile);
+        try (InputStream in = Files.newInputStream(part)) {
+            in.skipNBytes(offset);
+            return in.readNBytes(length);
+        } catch (IOException e) {
+            throw new IllegalStateException("读 part 数据失败: " + part, e);
+        }
+    }
+
     /**
      * 第 10 节导出。同一对象同一版本重复导出覆盖同一目录（先清空再写）。
      */

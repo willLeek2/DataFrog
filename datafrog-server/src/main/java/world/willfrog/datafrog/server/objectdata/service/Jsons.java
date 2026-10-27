@@ -1,13 +1,14 @@
 package world.willfrog.datafrog.server.objectdata.service;
 
+import world.willfrog.datafrog.server.objectdata.domain.AssertionSpec;
 import world.willfrog.datafrog.server.objectdata.domain.SemanticRef;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 本模块三个集合列（semantic_refs / inputs / primary_key / part_checksums）的 JSON 读写小工具。
- * 只支持我们自己写出的两种形态：字符串数组与 {name,version} 对象数组——不引 JSON 依赖，
+ * 本模块集合列（semantic_refs / inputs / primary_key / assertions / part_checksums）的 JSON 读写小工具。
+ * 只支持我们自己写出的三种形态：字符串数组、{name,version} 对象数组、断言对象数组——不引 JSON 依赖，
  * 也不承担解析任意 JSON 的职责。写入时字符串做过转义；解析按同名规则还原。
  */
 final class Jsons {
@@ -63,6 +64,75 @@ final class Jsons {
     /** sha256 串包成 JSON 标量（part_checksums 用 JSONB || 拼接时需要的是带引号的元素）。 */
     static String jsonScalar(String value) {
         return "\"" + escape(value) + "\"";
+    }
+
+    /** 断言对象数组（对象行 assertions 列），键名与契约 AssertionSpec 字段同名（snake_case）。 */
+    static String writeAssertions(List<AssertionSpec> specs) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < specs.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            AssertionSpec a = specs.get(i);
+            sb.append("{\"type\":\"").append(escape(a.type())).append("\",")
+              .append("\"date_value\":\"").append(escape(a.dateValue() == null ? "" : a.dateValue())).append("\",")
+              .append("\"count_value\":").append(a.countValue()).append(',')
+              .append("\"depends_on\":").append(writeStringArray(a.dependsOn() == null ? List.of() : a.dependsOn()))
+              .append('}');
+        }
+        return sb.append(']').toString();
+    }
+
+    static List<AssertionSpec> readAssertions(String json) {
+        List<AssertionSpec> out = new ArrayList<>();
+        Parser p = new Parser(json);
+        p.skipWs();
+        p.expect('[');
+        p.skipWs();
+        if (p.peek() == ']') {
+            p.next();
+            return out;
+        }
+        while (true) {
+            p.skipWs();
+            p.expect('{');
+            String type = null;
+            String dateValue = "";
+            long countValue = 0;
+            List<String> dependsOn = new ArrayList<>();
+            p.skipWs();
+            while (p.peek() != '}') {
+                String key = p.parseString();
+                p.skipWs();
+                p.expect(':');
+                p.skipWs();
+                switch (key) {
+                    case "type" -> type = p.parseString();
+                    case "date_value" -> dateValue = p.parseString();
+                    case "count_value" -> countValue = p.parseLongValue();
+                    case "depends_on" -> dependsOn.addAll(p.parseStringArray());
+                    default -> throw new IllegalArgumentException("非法断言 JSON: " + json);
+                }
+                p.skipWs();
+                if (p.peek() == ',') {
+                    p.next();
+                    p.skipWs();
+                }
+            }
+            p.expect('}');
+            if (type == null) {
+                throw new IllegalArgumentException("断言缺 type: " + json);
+            }
+            out.add(new AssertionSpec(type, dateValue, countValue, dependsOn));
+            p.skipWs();
+            char c = p.next();
+            if (c == ']') {
+                return out;
+            }
+            if (c != ',') {
+                throw new IllegalArgumentException("非法 JSON 数组: " + json);
+            }
+        }
     }
 
     static List<String> readStringArray(String json) {
@@ -197,6 +267,45 @@ final class Jsons {
                     sb.append(c);
                 }
             }
+        }
+
+        /** 解析器内联字符串数组（depends_on 嵌套在断言对象里，复用同一个游标）。 */
+        List<String> parseStringArray() {
+            skipWs();
+            expect('[');
+            List<String> values = new ArrayList<>();
+            skipWs();
+            if (peek() == ']') {
+                next();
+                return values;
+            }
+            while (true) {
+                values.add(parseString());
+                skipWs();
+                char c = next();
+                if (c == ']') {
+                    return values;
+                }
+                if (c != ',') {
+                    throw new IllegalArgumentException("非法 JSON 数组");
+                }
+            }
+        }
+
+        /** 整数值（容忍负号；正常写入的 count_value 都非负，防御手写 JSON）。 */
+        long parseLongValue() {
+            skipWs();
+            StringBuilder num = new StringBuilder();
+            if (i < s.length() && peek() == '-') {
+                num.append(next());
+            }
+            while (i < s.length() && Character.isDigit(peek())) {
+                num.append(next());
+            }
+            if (num.isEmpty()) {
+                throw new IllegalArgumentException("非法整数值: " + s);
+            }
+            return Long.parseLong(num.toString());
         }
     }
 }

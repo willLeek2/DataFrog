@@ -51,6 +51,8 @@ public interface DataObjectVersionMapper {
                 content_path AS "contentPath", part_count AS "partCount",
                 part_checksums::text AS "partChecksumsJson", row_count AS "rowCount",
                 coverage_end AS "coverageEnd", content_checksum AS "contentChecksum",
+                continuous_complete_date AS "continuousCompleteDate",
+                has_gap_after_watermark AS "hasGapAfterWatermark",
                 status AS "status", created_at AS "createdAt", watermark_updated_at AS "watermarkUpdatedAt"
             FROM datafrog_object_version WHERE object_id = #{objectId} AND version = #{version}
             """)
@@ -62,6 +64,8 @@ public interface DataObjectVersionMapper {
                 content_path AS "contentPath", part_count AS "partCount",
                 part_checksums::text AS "partChecksumsJson", row_count AS "rowCount",
                 coverage_end AS "coverageEnd", content_checksum AS "contentChecksum",
+                continuous_complete_date AS "continuousCompleteDate",
+                has_gap_after_watermark AS "hasGapAfterWatermark",
                 status AS "status", created_at AS "createdAt", watermark_updated_at AS "watermarkUpdatedAt"
             FROM datafrog_object_version
             WHERE object_id = #{objectId} AND status = 'ACTIVE'

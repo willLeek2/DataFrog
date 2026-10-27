@@ -1,7 +1,10 @@
 package world.willfrog.datafrog.server.objectdata.service;
 
 import org.springframework.stereotype.Service;
+import world.willfrog.datafrog.server.objectdata.domain.AssertionSpec;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -44,6 +47,57 @@ public class ConventionValidator {
         }
         if (cmd.csvContent() == null || cmd.csvContent().length == 0) {
             throw new ObjectStoreExceptions.InvalidArgumentException("csv_content 不能为空");
+        }
+        validateAssertions(cmd.assertions());
+    }
+
+    /**
+     * 断言登记校验（014-data-04，从轻）：type 必填；三类已知类型各查自己的参数；
+     * 类型字符串不做白名单——认不出的类型在求值时判不通过（既定语义），登记不拦。
+     */
+    public void validateAssertions(List<AssertionSpec> assertions) {
+        if (assertions == null) {
+            return;
+        }
+        for (AssertionSpec a : assertions) {
+            if (a.type() == null || a.type().isBlank()) {
+                throw new ObjectStoreExceptions.InvalidArgumentException("断言 type 不能为空");
+            }
+            switch (a.type()) {
+                case "coverage_end_at_or_after" -> {
+                    if (!isParsableDate(a.dateValue())) {
+                        throw new ObjectStoreExceptions.InvalidArgumentException(
+                                "coverage_end_at_or_after 的 date_value 须可解析为 YYYY-MM-DD: " + a.dateValue());
+                    }
+                }
+                case "row_count_at_least" -> {
+                    if (a.countValue() < 0) {
+                        throw new ObjectStoreExceptions.InvalidArgumentException(
+                                "row_count_at_least 的 count_value 须 >= 0: " + a.countValue());
+                    }
+                }
+                case "depends_on_objects_pass" -> {
+                    if (a.dependsOn() == null || a.dependsOn().isEmpty()) {
+                        throw new ObjectStoreExceptions.InvalidArgumentException(
+                                "depends_on_objects_pass 的 depends_on 不能为空");
+                    }
+                }
+                default -> {
+                    // 认不出的类型不在这里拒（求值时按 unknown_type 判不通过）
+                }
+            }
+        }
+    }
+
+    private static boolean isParsableDate(String v) {
+        if (v == null) {
+            return false;
+        }
+        try {
+            LocalDate.parse(v);
+            return true;
+        } catch (DateTimeParseException e) {
+            return false;
         }
     }
 
