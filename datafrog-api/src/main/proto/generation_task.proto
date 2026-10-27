@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+
+package world.willfrog.datafrog.idl;
+
+// 014-data-02 生成任务受理与受控运行。
+// 本服务只覆盖创建与状态查询两段；管理员审核端点（review）归 014-data-03，不在本服务。
+// 业务失败经响应里的 error_code 字段返回可机读错误码；HTTP REST 对外入口归 014-data-06。
+service GenerationTaskService {
+  rpc CreateGenerationTask(CreateGenerationTaskRequest) returns (CreateGenerationTaskResponse);
+  rpc GetGenerationTask(GetGenerationTaskRequest) returns (GetGenerationTaskResponse);
+}
+
+// 生成任务状态机。
+// FAILED_INCOMPLETE 本波不由 014-data-02 置位：「失败时保留成功部分并标记不完整」的正文在
+// 014-data-03，产物记录在 03 落地前不存在，该状态届时由 03 的产物保留逻辑写入。
+enum GenerationTaskStatus {
+  GENERATION_TASK_STATUS_UNSPECIFIED = 0;
+  ACCEPTED = 1;          // 已受理，正在拉起受控运行
+  RUNNING = 2;           // 受控 Agent 运行进行中
+  SUCCEEDED = 3;         // 运行成功结束
+  FAILED = 4;            // 失败终态（错误码区分超时 TASK_TIMEOUT 与运行失败等）
+  FAILED_INCOMPLETE = 5; // 失败终态且保留部分成功产物（由 014-data-03 写入）
+}
+
+message CreateGenerationTaskRequest {
+  // 登录态凭证，平台第一跳校验后得到用户身份；Agent 运行侧的 user_id 由平台代填。
+  string session_token = 1;
+  // 任务规格里声明的目标对象名。ds_ 前缀的对象 id 要 014-data-03 审核登记后才产生，
+  // 届时由 03 的回灌登记逻辑回填关联，本字段不接收 ds_ id。
+  string target_object_name = 2;
+  // 任务规格 JSON：行为边界、输出格式（用户样例或平台模板库引用）、时限（timeout_seconds，必填）。
+  string spec_json = 3;
+  // 调用方幂等键：同一用户内重复提交去重、不重复计费；命中直接返回已有任务。
+  // 去重维度是 (user_id, client_request_id)，跨用户撞键互不可见。
+  string client_request_id = 4;
+}
+
+message CreateGenerationTaskResponse {
+  string task_id = 1;
+  GenerationTaskStatus status = 2;
+  // true 表示本次是重复提交命中已有任务，未新建也未重复计费。
+  bool deduplicated = 3;
+  // 业务失败时的可机读错误码
+  // （UNAUTHENTICATED / INVALID_SPEC / CREDIT_INSUFFICIENT / GENERATION_IN_PROGRESS /
+  //   GENERATION_LAUNCH_FAILED；后端故障用 INTERNAL），成功为空。
+  // GENERATION_LAUNCH_FAILED 时任务行已落库（FAILED 且预扣全额回补），task_id 与 status 一并返回。
+  string error_code = 4;
+  string error_message = 5;
+}
+
+message GetGenerationTaskRequest {
+  string session_token = 1;
+  string task_id = 2;
+}
+
+message GetGenerationTaskResponse {
+  string task_id = 1;
+  GenerationTaskStatus status = 2;
+  // 平台拉起的 Agent 运行编号；未拉起成功为空。
+  string run_id = 3;
+  // 失败时是否有部分成功产物（014-data-03 写入，本波恒为 false）。
+  bool incomplete = 4;
+  // 终态时的错误码（TASK_TIMEOUT / GENERATION_RUN_FAILED / GENERATION_LAUNCH_FAILED）与说明。
+  string error_code = 5;
+  string error_message = 6;
+  // 非终态时透传的 Agent 运行状态摘要（phase、current_tool 等），JSON 形态；终态为空。
+  string run_status_json = 7;
+  // 受理时预扣的积分；终态实结的积分。回补金额等于两者之差。
+  int32 credit_charged = 8;
+  int32 credit_settled = 9;
+  int64 created_at_epoch = 10;
+  int64 finished_at_epoch = 11;
+  // 业务失败时的可机读错误码（UNAUTHENTICATED / TASK_NOT_FOUND），成功为空。
+  string query_error_code = 12;
+  string query_error_message = 13;
+}

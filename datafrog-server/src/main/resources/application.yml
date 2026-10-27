@@ -10,11 +10,16 @@ spring:
     username: ${AF_DB_MAIN_USER}
     password: ${AF_DB_MAIN_PASSWORD}
 
-# 014-data-01 数据对象存储：内容（Parquet part 与导出文件）的数据根目录，
+# 数据对象存储：内容（Parquet part 与导出文件）的数据根目录，
 # 相对路径按进程工作目录解析，生产由部署环境注入绝对路径。
 datafrog:
   objectstore:
     data-root: ${DATAFROG_OBJECTSTORE_DATA_ROOT:data/objectstore}
+
+# MyBatis 下划线列名转驼峰实体属性（任务表 Mapper 用 SELECT *，必须开）。
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
 
 # 预留：Redis。启用时同步取消 pom.xml 中 spring-boot-starter-data-redis 的注释。
 #   data:
@@ -50,3 +55,9 @@ dubbo:
 # 泳道说明：应用零代码。泳道身份由 Beta 部署控制器经环境变量注入
 # （AF_LANE_TRAFFIC_SCOPE_ID，以及 dubbo.provider.parameters 里的 dubbo.tag 键），
 # 本服务与 alphafrog 既有服务同形态，部署进泳道后自动参与标签路由。
+
+# 014-data-02 过渡配置：主仓库鉴权校验 provider 落地前，本项为空（默认）时一切登录态判无效，
+# 受理链路在第一跳拦下；泳道验收期间设为验收用户标识，任何非空 session_token 视为该用户通过。
+datafrog:
+  auth:
+    passthrough-user-id: ${DATAFROG_AUTH_PASSTHROUGH_USER_ID:}
