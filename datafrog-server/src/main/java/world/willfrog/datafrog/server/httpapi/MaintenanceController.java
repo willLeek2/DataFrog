@@ -56,7 +56,7 @@ public class MaintenanceController {
      * 异常显式标记=VIOLATION 可独立过滤，人工介入路径就是查这个端点。
      */
     @GetMapping("/maintenance/retention-checks")
-    public JsonNode retentionChecks(@RequestParam(required = false) String objectId,
+    public JsonNode retentionChecks(@RequestParam(name = "object_id", required = false) String objectId,
                                     @RequestParam(required = false) String verdict,
                                     HttpServletRequest request) {
         accessGuard.requireAdmin(AuthContext.requireUserId(request));
