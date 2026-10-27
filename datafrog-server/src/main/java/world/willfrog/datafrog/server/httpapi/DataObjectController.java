@@ -26,6 +26,7 @@ import world.willfrog.datafrog.idl.ListDataObjectsResponse;
 import world.willfrog.datafrog.server.maintenance.ExportRateLimitedException;
 import world.willfrog.datafrog.server.maintenance.ExportRateLimiter;
 import world.willfrog.datafrog.server.objectdata.repo.DataObjectMapper;
+import world.willfrog.datafrog.server.objectdata.service.DataObjectRegistryService;
 import world.willfrog.datafrog.server.rpc.DataObjectServiceImpl;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -42,8 +43,9 @@ import java.nio.file.Path;
  * 应答原则：01 信封 ok=true 透出 proto 转 JSON 的业务字段，ok=false 按方案映射表落成
  * problem+json。可见性骨架（VisibilityGuard）在详情/删除/导出/下载前判定，列表逐张过滤。
  *
- * total 的取舍：proto 列表应答是有意设计的纯分页枚举（不带总数），HTTP 列表要回过滤前总数，
- * 只能旁路取一次 ACTIVE 对象计数；卡片本身仍全部经 01 的信封与 proto 契约，不绕开。
+ * total 的取舍：proto 列表应答是有意设计的纯分页枚举（不带总数），HTTP 列表另经服务层
+ * 旁路取过滤后计数（014-data-05 方案 D4 起 total 与 nextPageToken 都按过滤后口径）；
+ * 卡片本身仍全部经 01 的信封与 proto 契约，不绕开。
  */
 @RestController
 @RequestMapping(SessionAuthFilter.API_PREFIX)
@@ -54,7 +56,7 @@ public class DataObjectController {
     private static final int MAX_LIMIT = DataObjectServiceImpl.MAX_PAGE_SIZE;
 
     private final DataObjectServiceImpl dataObjectService;
-    private final DataObjectMapper dataObjectMapper;
+    private final DataObjectRegistryService registry;
     private final VisibilityGuard visibilityGuard;
     private final ErrorMapping errorMapping;
     private final ExportFileSupport exportFiles;
@@ -62,14 +64,14 @@ public class DataObjectController {
     private final ObjectMapper objectMapper;
 
     public DataObjectController(DataObjectServiceImpl dataObjectService,
-                                DataObjectMapper dataObjectMapper,
+                                DataObjectRegistryService registry,
                                 VisibilityGuard visibilityGuard,
                                 ErrorMapping errorMapping,
                                 ExportFileSupport exportFiles,
                                 ExportRateLimiter exportRateLimiter,
                                 ObjectMapper objectMapper) {
         this.dataObjectService = dataObjectService;
-        this.dataObjectMapper = dataObjectMapper;
+        this.registry = registry;
         this.visibilityGuard = visibilityGuard;
         this.errorMapping = errorMapping;
         this.exportFiles = exportFiles;
@@ -78,20 +80,59 @@ public class DataObjectController {
     }
 
     /**
-     * GET /data-objects?limit=&offset=。limit 缺省 20、上限 200（口径照抄 01 的
-     * pageSizeOf：非正取缺省，超上限截断）；offset 是十进制起始位，缺省 0，
-     * 非十进制或负数归 400。翻译成 proto 的 page_size / page_token（offset 字符串，首页空串）。
+     * GET /data-objects?limit=&offset=&filter_...=（014-data-05 方案 D4）。
+     * limit 缺省 20、上限 200（口径照抄 01 的 pageSizeOf：非正取缺省，超上限截断）；
+     * offset 是十进制起始位，缺省 0，非十进制或负数归 400。翻译成 proto 的 page_size /
+     * page_token（offset 字符串，首页空串）。
+     *
+     * 过滤参数七个，参数名与 proto 字段名一致，全部可选：filter_semantic_name、
+     * filter_field_name、filter_coverage_scope_substring、filter_coverage_start_from、
+     * filter_coverage_end_to、filter_freshness_since、filter_assertion_status。
+     * filter_owner 不接受调用方传入（bob 必写句）：请求里出现该参数名直接 400，
+     * 服务端固定填当前登录用户——所以七个参数都留空时 HTTP 列表也只列这个用户
+     * 自己的对象，与 01 的全库分页不同；全库分页行为保留给进程内不带属主条件的
+     * 内部调用。HTTP 面与主仓库工具路径同口径（属主过滤是平台对自己列表的约束）。
+     *
+     * total 与 nextPageToken 都按过滤后计数（bob 必写句）：nextPageToken 直接透传
+     * proto 应答（rpc 层已按「offset+本页条数<过滤后总数」推进）；total 经旁路一次
+     * 服务层过滤列表取 page.total（proto 应答是有意设计的纯分页枚举、不带总数，
+     * 旁路 limit=1 只为拿计数；带断言过滤时计数经两段式现算，同样准确）。
      */
     @GetMapping("/data-objects")
     public JsonNode list(@RequestParam(required = false) Integer limit,
                          @RequestParam(required = false) String offset,
+                         @RequestParam(required = false) String filter_semantic_name,
+                         @RequestParam(required = false) String filter_field_name,
+                         @RequestParam(required = false) String filter_coverage_scope_substring,
+                         @RequestParam(required = false) String filter_coverage_start_from,
+                         @RequestParam(required = false) String filter_coverage_end_to,
+                         @RequestParam(required = false) String filter_freshness_since,
+                         @RequestParam(required = false) String filter_assertion_status,
                          HttpServletRequest request) throws IOException {
         String userId = AuthContext.requireUserId(request);
+        if (request.getParameterMap().containsKey("filter_owner")) {
+            throw errorMapping.invalidArgument(
+                    "filter_owner 是服务端固定注入的条件，不接受调用方传入");
+        }
         int size = normalizeLimit(limit);
         int off = parseOffset(offset);
+        world.willfrog.datafrog.server.objectdata.domain.AssertionStatus statusFilter =
+                parseAssertionStatus(filter_assertion_status);
         ListDataObjectsRequest protoRequest = ListDataObjectsRequest.newBuilder()
                 .setPageSize(size)
                 .setPageToken(off == 0 ? "" : String.valueOf(off))
+                .setFilterSemanticName(orEmpty(filter_semantic_name))
+                .setFilterFieldName(orEmpty(filter_field_name))
+                .setFilterCoverageScopeSubstring(orEmpty(filter_coverage_scope_substring))
+                .setFilterCoverageStartFrom(orEmpty(filter_coverage_start_from))
+                .setFilterCoverageEndTo(orEmpty(filter_coverage_end_to))
+                .setFilterFreshnessSince(orEmpty(filter_freshness_since))
+                .setFilterAssertionStatus(statusFilter == null
+                        ? world.willfrog.datafrog.idl.AssertionStatus.ASSERTION_STATUS_UNKNOWN
+                        : world.willfrog.datafrog.idl.AssertionStatus.valueOf(
+                                "ASSERTION_STATUS_" + statusFilter.name()))
+                // 服务端固定注入当前登录用户（D4：HTTP 列表只列自己的对象）
+                .setFilterOwner(userId)
                 .build();
         ListDataObjectsResponse response = dataObjectService.listDataObjects(protoRequest);
         if (!response.getResult().getOk()) {
@@ -99,21 +140,23 @@ public class DataObjectController {
         }
         ArrayNode items = objectMapper.createArrayNode();
         for (var card : response.getCardsList()) {
-            // 骨架期可见性唯一规则是 owner 相等；登记卡上的 visibility 档位语义待拍板，暂不参与判定
+            // 属主已在 SQL 层过滤，这里保留逐卡判定作为将来可见性档位扩展的接缝
+            // （骨架期唯一规则仍是 owner 相等，注入属主后恒可见）
             if (!visibilityGuard.isVisible(card.getOwner(), userId)) {
                 continue;
             }
             items.add(objectMapper.readTree(JsonFormat.printer().print(card)));
         }
-        long total = dataObjectMapper.countActive();
+        // total 旁路：与上面同一组过滤条件取一次服务层列表，只用它的过滤后计数
+        DataObjectMapper.ListFilters filters = new DataObjectMapper.ListFilters(
+                filter_semantic_name, filter_field_name, filter_coverage_scope_substring,
+                filter_coverage_start_from, filter_coverage_end_to, filter_freshness_since, userId);
+        long total = registry.list(filters, statusFilter, 1, 0).total();
         ObjectNode body = objectMapper.createObjectNode();
         body.set("items", items);
-        // 过滤前总数（骨架期口径）：如实回未过滤的 ACTIVE 对象计数，不做「按可见条目凑数」的假分页
         body.put("total", total);
-        // 翻页游标沿用 01 语义（存储侧偏移量）：按未过滤的本页条数推进，
-        // 过滤只影响本页回多少张，不造成跳页或重页
-        if (off + response.getCardsCount() < total) {
-            body.put("nextPageToken", String.valueOf(off + response.getCardsCount()));
+        if (!response.getNextPageToken().isBlank()) {
+            body.put("nextPageToken", response.getNextPageToken());
         }
         return body;
     }
@@ -256,6 +299,33 @@ public class DataObjectController {
         response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"");
         try (InputStream in = Files.newInputStream(file)) {
             in.transferTo(response.getOutputStream());
+        }
+    }
+
+    /** proto3 builder 的 setString 不接受 null，HTTP 参数缺省统一转空串。 */
+    private static String orEmpty(String raw) {
+        return raw == null ? "" : raw;
+    }
+
+    /**
+     * filter_assertion_status 的枚举解析：缺省、空串、UNKNOWN 都表示不加断言条件（回 null）；
+     * 合法值 NO_ASSERTIONS/PASS/PARTIAL/FAIL（domain 枚举即此短名，与 proto 枚举同名去前缀）；
+     * 带 ASSERTION_STATUS_ 前缀的长写同样接受（与 proto 字段值形态一致）；其余值 400。
+     */
+    private world.willfrog.datafrog.server.objectdata.domain.AssertionStatus parseAssertionStatus(String raw) {
+        if (raw == null || raw.isBlank() || "UNKNOWN".equals(raw.trim())
+                || "ASSERTION_STATUS_UNKNOWN".equals(raw.trim())) {
+            return null;
+        }
+        String candidate = raw.trim();
+        if (candidate.startsWith("ASSERTION_STATUS_")) {
+            candidate = candidate.substring("ASSERTION_STATUS_".length());
+        }
+        try {
+            return world.willfrog.datafrog.server.objectdata.domain.AssertionStatus.valueOf(candidate);
+        } catch (IllegalArgumentException e) {
+            throw errorMapping.invalidArgument(
+                    "filter_assertion_status 非法（NO_ASSERTIONS/PASS/PARTIAL/FAIL）: " + raw);
         }
     }
 
