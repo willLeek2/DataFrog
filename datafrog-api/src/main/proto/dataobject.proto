@@ -407,7 +407,14 @@ message ReadObjectDataRequest {
 message ReadObjectDataResponse {
   ResultInfo result = 1;
   // 该版本已入库内容的一段字节；part 按文件名升序（与版本行 content_checksum 的拼接定义同序）。
+  // 一页不跨 part：服务端取 min(剩余页上限, 当前 part 剩余字节)，页尾恰好落在 part 边界时
+  // part_boundary_end=true。调用方据此把流拆回 part 文件（拼接后的字节流不是合法单文件 parquet，
+  // 消费侧按 part 文件集合喂给 parquet 读取器）。
   bytes data = 2;
   // 空串=已读完。
   string next_page_token = 3;
+  // 本段字节起始所在的 part 序号（part-%06d.parquet 的序号，按文件名升序）。
+  int32 part_index = 4;
+  // 本段字节是否恰好结束于一个 part 的末尾。
+  bool part_boundary_end = 5;
 }
