@@ -10,6 +10,9 @@ import world.willfrog.datafrog.idl.AssertionDetail;
 import world.willfrog.datafrog.idl.AssertionSpec;
 import world.willfrog.datafrog.idl.AssertionStatus;
 import world.willfrog.datafrog.idl.CreateNewVersionRequest;
+import world.willfrog.datafrog.idl.DefinitionStatus;
+import world.willfrog.datafrog.idl.GetSemanticDefinitionRequest;
+import world.willfrog.datafrog.idl.GetSemanticDefinitionResponse;
 import world.willfrog.datafrog.idl.CreateNewVersionResponse;
 import world.willfrog.datafrog.idl.DataObjectCard;
 import world.willfrog.datafrog.idl.DataObjectService;
@@ -33,6 +36,7 @@ import world.willfrog.datafrog.idl.SemanticDefinitionCard;
 import world.willfrog.datafrog.idl.SemanticRef;
 
 import java.io.IOException;
+import java.util.Properties;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -61,6 +65,8 @@ import java.util.function.Consumer;
  * 程序生成的 psql-phase2.sql）；c4-22（--phase 3，先跑 psql-phase3.sql）；c4-20（--phase 4，
  * 对象 B 的 object_id 由参数传入）。c4-20 的空列情形在 phase 1 末尾对对象 A 做了一次预检
  * （正式用例仍以 phase 4 对提升对象的断言为准）。c6/c7/c8/c9 走主仓库侧真实 run，不在本程序。
+ * phase 5（20261028 守卫裁定后新增）：c8 提升源改取数工具后，先登记一条如实的股票日线语义定义，
+ * 供 run 驱动器 promote 的 semantic_refs 使用（既有 18 条定义全是指标类，没有一条能如实标注）。
  *
  * 共库隔离（对 06 残留）：全部 List/过滤断言叠加 filter_owner=运行身份；结果断言只做
  * 「谓词成立 + 指定对象在结果内」，不做全库计数。
@@ -126,12 +132,12 @@ public final class E2eMain {
         String owner = arg(args, "--owner", "");
         if (owner.isBlank()) {
             System.err.println("用法: --host <host> --port <port> --owner <运行身份用户名> "
-                    + "--phase 1|2|3|4|all [--out out] [--prefix acc04-] "
+                    + "--phase 1|2|3|4|5|all [--out out] [--prefix acc04-] "
                     + "[--fresh-date 2026-01-15] [--object-id <phase4 对象 B 的 id>]");
             System.exit(2);
         }
-        if (!List.of("1", "2", "3", "4", "all").contains(phase)) {
-            System.err.println("未知 --phase: " + phase + "（可选 1|2|3|4|all）");
+        if (!List.of("1", "2", "3", "4", "5", "all").contains(phase)) {
+            System.err.println("未知 --phase: " + phase + "（可选 1|2|3|4|5|all）");
             System.exit(2);
         }
         if (("4".equals(phase)) && arg(args, "--object-id", "").isBlank()) {
@@ -171,6 +177,7 @@ public final class E2eMain {
             case "2" -> e2e.phase2(svc, cfg);
             case "3" -> e2e.phase3(svc, cfg);
             case "4" -> e2e.phase4(svc, cfg);
+            case "5" -> e2e.phase5(svc, cfg);
             case "all" -> {
                 e2e.phase1(svc, cfg);
                 e2e.phase2(svc, cfg);
@@ -817,6 +824,48 @@ public final class E2eMain {
         } else {
             check("c4-20.freshness 调用", false, "异常");
         }
+    }
+
+    // ══════════════ phase 5：c8 提升源语义定义登记（20261028 守卫裁定后新增） ══════════════
+
+    /**
+     * 背景：run d6f83cc9 实证 promote 守卫拒绝挂载副本再提升（PLATFORM_OBJECT_SELF_PROMOTE，
+     * PromoteDatasetTool:179，bob 审过的定案行为，不改），c8 场景改从取数工具产出的数据集提升
+     * （getStockDaily → listMyData 编号 → promote 该编号）。取数内容是股票日线行情，泳道库里
+     * 既有 18 条语义定义全是指标类，没有一条能如实标注，所以这里登记一条如实的定义。
+     * 输出：SEMANTIC_REF=<name>@1，run 驱动器的 --semantic-ref 直接用；def.SD 回写 ids 文件。
+     */
+    private void phase5(DataObjectService svc, Config cfg) throws IOException {
+        section("phase5 c8 提升对象 B 的语义定义登记（源=取数工具 getStockDaily）");
+        String stampNoDash = DateTimeFormatter.ofPattern("yyyyMMddHHmmss").format(LocalDateTime.now());
+        String defSd = prefixSafe(cfg) + "sd" + stampNoDash;
+        RegisterSemanticDefinitionResponse regSd = svc.registerSemanticDefinition(
+                RegisterSemanticDefinitionRequest.newBuilder().setName(defSd).setVersion(1)
+                        .setDisplayName("e2e04 股票日线行情（c8 提升源）")
+                        .setDefinition("个股日线行情基础列（开高低收、成交量额等），来源 getStockDaily "
+                                + "取数工具直采；c8 提升对象 B 的如实语义标签")
+                        .setCalculation("取数工具直采，无计算").setUnit("-").setScope("e2e04").build());
+        record("reg-def-SD", regSd);
+        check("c8.提升源语义定义登记 ok", regSd.getResult().getOk(), regSd.getResult().getMessage());
+        GetSemanticDefinitionResponse getSd = svc.getSemanticDefinition(
+                GetSemanticDefinitionRequest.newBuilder().setName(defSd).setVersion(1).build());
+        record("get-def-SD", getSd);
+        check("c8.提升源语义定义回查 ok 且 ACTIVE",
+                getSd.getResult().getOk() && getSd.getCard().getStatus() == DefinitionStatus.ACTIVE,
+                getSd.getResult().getMessage());
+        Properties ids = new Properties();
+        Path idsFile = cfg.out().resolve("object-ids.properties");
+        if (Files.exists(idsFile)) {
+            try (var r = Files.newBufferedReader(idsFile, StandardCharsets.UTF_8)) {
+                ids.load(r);
+            }
+        }
+        ids.setProperty("def.SD", defSd);
+        Files.createDirectories(cfg.out());
+        try (var w = Files.newBufferedWriter(idsFile, StandardCharsets.UTF_8)) {
+            ids.store(w, "014-data-04 e2e phase1 登记对象 id（phase 2/3/5 读取）");
+        }
+        System.out.println("SEMANTIC_REF=" + defSd + "@1   <-- run 驱动器 --semantic-ref 用这个值");
     }
 
     // ── rpc 包装（异常时返回 null 并记 evidence，不中断整轮） ──
