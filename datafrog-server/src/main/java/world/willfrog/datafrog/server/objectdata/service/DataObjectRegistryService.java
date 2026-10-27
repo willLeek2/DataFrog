@@ -55,7 +55,7 @@ public class DataObjectRegistryService {
             byte[] csvContent) {
     }
 
-    /** 登记卡视图：对象行 + ACTIVE 版本行水位四项的读取时投影。 */
+    /** 登记卡视图：对象行 + ACTIVE 版本行的行数、覆盖起止日期、内容校验和的读取时投影。 */
     public record CardView(DataObject object, long rowCount, String coverageStart, String coverageEnd,
                            String contentChecksum) {
     }
