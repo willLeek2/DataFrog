@@ -7,18 +7,18 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 /**
- * 数据对象行（声明与身份类字段）。水位与覆盖四项不在本表（唯一来源=版本行）。
+ * 数据对象行（声明与身份类字段）。数据覆盖四项不在本表（唯一来源=版本行）。
  * semantic_refs / inputs / primary_key / assertions 以 JSON 字符串写入，SQL 内显式转 JSONB。
  */
 @Mapper
 public interface DataObjectMapper {
 
-    /** 枚举过滤条件（014-data-04）：对象行条件三件 + ACTIVE 版本行水位条件三件；断言状态过滤不在 SQL。
+    /** 枚举过滤条件（014-data-04）：对象行条件三件 + ACTIVE 版本行覆盖条件三件；断言状态过滤不在 SQL。
      *  全部留空时 rpc 层直接走 listActive（01 纯分页行为不动）。 */
     record ListFilters(String semanticName, String fieldName, String coverageScopeSubstring,
                        String coverageStartFrom, String coverageEndTo, String freshnessSince) {
 
-        /** 任一水位条件非空时需要 JOIN ACTIVE 版本行下推。 */
+        /** 任一覆盖条件非空时需要 JOIN ACTIVE 版本行下推。 */
         public boolean joinVersion() {
             return notBlank(coverageStartFrom) || notBlank(coverageEndTo) || notBlank(freshnessSince);
         }
@@ -84,7 +84,7 @@ public interface DataObjectMapper {
 
     /**
      * 过滤枚举（014-data-04，动态 WHERE）。数据域/字段两条件走 EXISTS jsonb_array_elements(semantic_refs)
-     * 取 name（挂靠的语义定义本身就是字段级语义单元，定义表没有独立字段列）；水位条件三件经
+     * 取 name（挂靠的语义定义本身就是字段级语义单元，定义表没有独立字段列）；覆盖条件三件经
      * JOIN datafrog_object_version(status='ACTIVE') 下推（01 已建 partial index）。
      * 断言状态过滤不在 SQL（结论现算不落库，归 service 两段式）：调用方带断言过滤时 limit 传 null，
      * 本方法就不带 LIMIT/OFFSET、候选按 id 序全量取出；无断言过滤时 limit 非 null，SQL 直出分页。

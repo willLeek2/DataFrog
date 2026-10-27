@@ -13,13 +13,13 @@ package world.willfrog.datafrog.idl;
 service DataObjectService {
   // 首次登记：挂靠校验→约定校验→内容落盘（Parquet part）→对象行+版本 1 行+台账 REGISTERED。
   rpc RegisterDataObject(RegisterDataObjectRequest) returns (RegisterDataObjectResponse);
-  // 同版本追加：新 Parquet part+水位三件推进（row_count、coverage_end、汇总 checksum），不升版。
+  // 同版本追加：新 Parquet part+数据覆盖三件推进（row_count、coverage_end、汇总 checksum），不升版。
   rpc AppendToObject(AppendToObjectRequest) returns (AppendToObjectResponse);
   // 修正升版：新版本行 ACTIVE、旧行 SUPERSEDED、台账 MODIFIED；旧版本字段组与 part 集合从此定格。
   rpc CreateNewVersion(CreateNewVersionRequest) returns (CreateNewVersionResponse);
   // 软删：台账 DELETED、对象标记不可见；物理清理等保留策略任务（本波不定义）。
   rpc DeleteDataObject(DeleteDataObjectRequest) returns (DeleteDataObjectResponse);
-  // 读取登记卡；水位与覆盖字段为当前 ACTIVE 版本行的读取时投影。
+  // 读取登记卡；数据覆盖字段为当前 ACTIVE 版本行的读取时投影。
   rpc GetDataObject(GetDataObjectRequest) returns (GetDataObjectResponse);
   // 枚举（014-data-04 起带可选过滤组，全留空=纯分页）。page_token 是偏移量：同一组过滤条件内
   // 可接着翻页；调用方改了任何过滤条件必须用空 token 从第一页重查；服务端不把过滤条件编进 token。
@@ -40,7 +40,7 @@ service DataObjectService {
   rpc GetAvailabilityAssertions(GetAvailabilityAssertionsRequest) returns (GetAvailabilityAssertionsResponse);
   // 014-data-04：按版本读已入库内容的一段字节（对象数据进沙箱的主通道）。part 按文件名升序流式返回，
   // 与版本行 content_checksum 的拼接定义同序；调用方拼完整字节后自行算 sha256 校验。
-  // 只读不写：不重算水位、不触碰导出目录；导出仍走 ExportDataObject。
+  // 只读不写：不重算数据覆盖事实、不触碰导出目录；导出仍走 ExportDataObject。
   rpc ReadObjectData(ReadObjectDataRequest) returns (ReadObjectDataResponse);
 }
 
@@ -222,7 +222,7 @@ message AppendToObjectRequest {
 
 message AppendToObjectResponse {
   ResultInfo result = 1;
-  // 追加后的登记卡（投影水位已推进）。
+  // 追加后的登记卡（投影数据覆盖已推进）。
   DataObjectCard card = 2;
 }
 

@@ -60,7 +60,7 @@ public class DataObjectRegistryService {
             List<AssertionSpec> assertions) {
     }
 
-    /** 登记卡视图：对象行 + ACTIVE 版本行水位四项的读取时投影 + 断言汇总现算（014-data-04）。 */
+    /** 登记卡视图：对象行 + ACTIVE 版本行数据覆盖四项的读取时投影 + 断言汇总现算（014-data-04）。 */
     public record CardView(DataObject object, long rowCount, String coverageStart, String coverageEnd,
                            String contentChecksum, AssertionStatus assertionStatus) {
     }
@@ -246,7 +246,7 @@ public class DataObjectRegistryService {
         return new ListPage(List.copyOf(matched.subList(from, to)), matched.size());
     }
 
-    /** 单行组卡：水位四项投影 + 断言汇总现算（依赖链结论走同一份 memo）。 */
+    /** 单行组卡：数据覆盖四项投影 + 断言汇总现算（依赖链结论走同一份 memo）。 */
     private CardView cardOf(DataObjectRow row, Map<String, AssertionStatus> memo) {
         DataObjectVersionRow active = versionMapper.getActive(row.id());
         if (active == null) {
@@ -312,7 +312,7 @@ public class DataObjectRegistryService {
     }
 
     /**
-     * 按版本读已入库内容的一段字节（M4，对象数据进沙箱的主通道）。只读不写：不重算水位、
+     * 按版本读已入库内容的一段字节（M4，对象数据进沙箱的主通道）。只读不写：不重算数据覆盖事实、
      * 不触碰导出目录（导出仍走 ExportDataObject）。version 空/0 解析为当前 ACTIVE 版本；
      * page_size 服务端钳制（<=0 取默认、超出取上限，均 {@link #MAX_READ_PAGE_BYTES}）；
      * 游标编码 (part_index, byte_offset)；part 按文件名升序（与版本行 content_checksum 的拼接
@@ -407,7 +407,7 @@ public class DataObjectRegistryService {
         }
         DataObjectRow row = objectMapper.getById(objectId);
         if (row == null || !"ACTIVE".equals(row.status())) {
-            // 依赖对象的存在性在单条判定层拦（dependency_missing）；这里是防御兜底，按 FAIL 记忆化防重复穿透
+            // 依赖对象的存在性在单条判定层拦（dependency_missing）；这里是防御性拦截，按 FAIL 记忆化防重复穿透
             memo.put(objectId, AssertionStatus.FAIL);
             return AssertionStatus.FAIL;
         }

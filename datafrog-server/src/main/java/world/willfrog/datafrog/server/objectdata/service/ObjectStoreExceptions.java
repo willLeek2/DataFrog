@@ -43,7 +43,7 @@ public final class ObjectStoreExceptions {
         }
     }
 
-    /** 对象存在但没有 ACTIVE 版本行（正常流程不会出现，防御性兜底）。 */
+    /** 对象存在但没有 ACTIVE 版本行（正常流程不会出现，防御性拦截）。 */
     public static final class NoActiveVersionException extends RuntimeException {
         public NoActiveVersionException(String objectId) {
             super("数据对象没有当前生效版本: " + objectId);
