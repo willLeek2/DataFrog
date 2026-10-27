@@ -23,6 +23,8 @@ import world.willfrog.datafrog.idl.GetDataObjectRequest;
 import world.willfrog.datafrog.idl.GetDataObjectResponse;
 import world.willfrog.datafrog.idl.ListDataObjectsRequest;
 import world.willfrog.datafrog.idl.ListDataObjectsResponse;
+import world.willfrog.datafrog.server.maintenance.ExportRateLimitedException;
+import world.willfrog.datafrog.server.maintenance.ExportRateLimiter;
 import world.willfrog.datafrog.server.objectdata.repo.DataObjectMapper;
 import world.willfrog.datafrog.server.rpc.DataObjectServiceImpl;
 
@@ -56,6 +58,7 @@ public class DataObjectController {
     private final VisibilityGuard visibilityGuard;
     private final ErrorMapping errorMapping;
     private final ExportFileSupport exportFiles;
+    private final ExportRateLimiter exportRateLimiter;
     private final ObjectMapper objectMapper;
 
     public DataObjectController(DataObjectServiceImpl dataObjectService,
@@ -63,12 +66,14 @@ public class DataObjectController {
                                 VisibilityGuard visibilityGuard,
                                 ErrorMapping errorMapping,
                                 ExportFileSupport exportFiles,
+                                ExportRateLimiter exportRateLimiter,
                                 ObjectMapper objectMapper) {
         this.dataObjectService = dataObjectService;
         this.dataObjectMapper = dataObjectMapper;
         this.visibilityGuard = visibilityGuard;
         this.errorMapping = errorMapping;
         this.exportFiles = exportFiles;
+        this.exportRateLimiter = exportRateLimiter;
         this.objectMapper = objectMapper;
     }
 
@@ -155,6 +160,12 @@ public class DataObjectController {
      * version 缺省或非正时取登记卡 current_version（正常流程即 ACTIVE 行）。不回传服务端的
      * export_dir（服务器内部路径不下发），每片改附本端点的下载路径。
      *
+     * 导出触发限额（014-data-05 方案 D8）：每用户每日次数与同对象冷却间隔（热配置起始值
+     * 50 次 / 60 秒），超限 429 RATE_LIMITED（06 预留码由 05 产出）。限额判断放在可见性
+     * 判定之后——不可见对象的请求连额度都不该消耗；触发即计数，导出随后成败都算一次。
+     * 分片下载通道（downloadShard）的「文件不在就补一次导出」不另计触发（方案只把本
+     * 端点定义为触发面）。
+     *
      * 已知边界（审查 P2 记账，接受现状）：本端点按方案字面每次触发全量重导出（清空目录重写），
      * 与下载通道的「文件已在就跳过」不完全对称；并发下「下载在读、导出清空重写」有竞态窗口，
      * 已打开句柄能读完，但「校验存在→打开」之间可能 FileNotFoundException 落成 500。
@@ -171,6 +182,11 @@ public class DataObjectController {
             throw errorMapping.fromResultInfo(existing.getResult());
         }
         visibilityGuard.requireVisible(existing.getCard().getOwner(), userId);
+        try {
+            exportRateLimiter.tryAcquire(userId, objectId);
+        } catch (ExportRateLimitedException e) {
+            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "RATE_LIMITED", e.getMessage());
+        }
         int effectiveVersion = resolveVersion(version, existing.getCard().getCurrentVersion());
         ExportDataObjectResponse response = dataObjectService.exportDataObject(
                 ExportDataObjectRequest.newBuilder().setObjectId(objectId).setVersion(effectiveVersion).build());

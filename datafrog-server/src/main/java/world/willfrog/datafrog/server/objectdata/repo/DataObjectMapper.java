@@ -198,6 +198,25 @@ public interface DataObjectMapper {
     @Select("SELECT COUNT(*) FROM datafrog_data_object WHERE status = 'ACTIVE'")
     long countActive();
 
+    /** 按对象 id 集合批量取行（014-data-05 语义查询的回表拼接用）。 */
+    @Select("""
+            <script>
+            SELECT id AS "id", name AS "name", description AS "description", source_type AS "sourceType",
+                owner AS "owner", visibility AS "visibility",
+                semantic_refs::text AS "semanticRefsJson", coverage_scope AS "coverageScope",
+                frequency AS "frequency", gen_method AS "genMethod", gen_task AS "genTask",
+                inputs::text AS "inputsJson", primary_key::text AS "primaryKeyJson",
+                adjustment AS "adjustment", ccy AS "ccy", current_version AS "currentVersion",
+                export_format AS "exportFormat", compression AS "compression", status AS "status",
+                created_at AS "createdAt", updated_at AS "updatedAt",
+                retention_days AS "retentionDays", version_keep_last AS "versionKeepLast",
+                deleted_at AS "deletedAt"
+            FROM datafrog_data_object WHERE id IN
+            <foreach collection="ids" item="item" open="(" separator="," close=")">#{item}</foreach>
+            </script>
+            """)
+    java.util.List<DataObjectRow> getByIds(@Param("ids") java.util.List<String> ids);
+
     /** 表存在性检查（建表脚本可重复执行；缺失=部署链路没跑 DDL，加载器据此 fail-fast）。 */
     @Select("SELECT to_regclass('datafrog_data_object') IS NOT NULL")
     boolean tableExists();

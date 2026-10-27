@@ -15,6 +15,7 @@ import world.willfrog.datafrog.server.objectdata.repo.DataObjectMapper;
 import world.willfrog.datafrog.server.objectdata.repo.DataObjectRow;
 import world.willfrog.datafrog.server.objectdata.repo.DataObjectVersionMapper;
 import world.willfrog.datafrog.server.objectdata.repo.DataObjectVersionRow;
+import world.willfrog.datafrog.server.maintenance.SemanticIndexFailureCounter;
 import world.willfrog.datafrog.server.semanticindex.SemanticIndexService;
 
 import java.security.SecureRandom;
@@ -90,12 +91,14 @@ public class DataObjectRegistryService {
     private final ContentStorageService contentStore;
     private final ConventionValidator validator;
     private final SemanticIndexService semanticIndex;
+    private final SemanticIndexFailureCounter indexFailureCounter;
     private final TransactionTemplate tx;
 
     public DataObjectRegistryService(DataObjectMapper objectMapper, DataObjectVersionMapper versionMapper,
                                      CatalogRecordMapper catalogMapper, SemanticDefinitionService definitionService,
                                      ContentStorageService contentStore, ConventionValidator validator,
                                      SemanticIndexService semanticIndex,
+                                     SemanticIndexFailureCounter indexFailureCounter,
                                      PlatformTransactionManager transactionManager) {
         this.objectMapper = objectMapper;
         this.versionMapper = versionMapper;
@@ -104,6 +107,7 @@ public class DataObjectRegistryService {
         this.contentStore = contentStore;
         this.validator = validator;
         this.semanticIndex = semanticIndex;
+        this.indexFailureCounter = indexFailureCounter;
         this.tx = new TransactionTemplate(transactionManager);
     }
 
@@ -231,8 +235,11 @@ public class DataObjectRegistryService {
             objectMapper.markDeleted(objectId, now);
             catalogMapper.insert(objectId, CatalogAction.DELETED.name(), "system", "软删（保留策略任务前不物理删）", now);
         });
-        // 删除后的索引清理由 014-data-05 的删除保留策略经 SemanticIndexService.deleteByObjectId
-        // 统一接走，本条删除路径不直接调（方案 D6）
+        // 删除时同步摘除向量点（014-data-05 方案 D5，台账 S8 主规则）：软删事务完成后调
+        // deleteByObjectId；失败只记 error 日志并计入失败计数，不推翻删除事实——向量点
+        // 残留由重建入口对账清理（D9），删除本身不能被索引可用性绑架。出处规则（方案 D5
+        // 定稿）：删除不级联派生对象引用，对象行永久保留作墓碑；检索面消失、档案面永存。
+        deleteIndexQuietly(objectId);
     }
 
     public CardView get(String objectId) {
@@ -406,13 +413,29 @@ public class DataObjectRegistryService {
     /**
      * 语义索引写入的静默封装：元数据落库是权威事实，索引可以按台账重建，
      * 所以向量写入失败只记 error 日志留重建线索，不推翻已成功的登记或升版。
+     * 失败计数（014-data-05 方案 D9，06 审查 P2-3 遗留）在捕获处累加，经维护端点透出。
      */
     private void upsertIndexQuietly(String objectId, String name, String description,
                                     String owner, String visibility) {
         try {
             semanticIndex.upsert(objectId, name, description, owner, visibility);
         } catch (Exception e) {
+            indexFailureCounter.onWriteFailure();
             log.error("语义索引写入失败（元数据已落库不受影响，可按台账重建）objectId={}: {}",
+                    objectId, e.getMessage());
+        }
+    }
+
+    /**
+     * 删除时同步摘除向量点的静默封装（014-data-05 方案 D5）：失败只记日志并计数，
+     * 不推翻删除事实；残留点由重建入口（D9）对账清理。
+     */
+    private void deleteIndexQuietly(String objectId) {
+        try {
+            semanticIndex.deleteByObjectId(objectId);
+        } catch (Exception e) {
+            indexFailureCounter.onDeleteFailure();
+            log.error("语义索引删除失败（软删已生效，残留点由重建对账清理）objectId={}: {}",
                     objectId, e.getMessage());
         }
     }
