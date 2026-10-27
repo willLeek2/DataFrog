@@ -400,13 +400,88 @@ public final class E2eMain {
                 rb2.status == 200 || rb2.status == 409, "status=" + rb2.status);
     }
 
-    // ══════════════ phase 2：run 全链骨架（驱动器协调后排期） ══════════════
+    // ══════════════ phase 2：受理段断言（run 段复用 wang 驱动器，排期另行通知） ══════════════
 
-    private void phase2(Config cfg) {
-        section("phase2 run 全链（骨架）");
-        check("phase2.未实现（run 驱动器与 wang 协调中）", true,
-                "修改任务受理→运行→附件取回→升版→基准守卫的 run 驱动排期另行通知；"
-                        + "phase 1/1b/3 不受阻塞");
+    /**
+     * 受理段（HTTP）现在就断言：无效规格 400、缺 version_note 400、base_version 给旧版本
+     * 受理即拒、受理成功、幂等重发 deduplicated。run 终态与升版断言等 wang 的改造版驱动器
+     * （05 的 run 由受理端点拉起、驱动器充当执行方，从 runId 接管）到位后并入本 phase。
+     */
+    private void phase2(Config cfg) throws Exception {
+        section("phase2 受理段（run 段等驱动器）");
+        String clientReqId = "e2e05-" + stamp;
+
+        // 无效规格：缺 base_object_id
+        HttpResult bad1 = httpPost(cfg, "/modification-tasks",
+                "{" + specJson("把对象改好", null, null, "例行修改") + ",\"clientRequestId\":\"" + clientReqId + "-bad1\"}");
+        check("p2.缺 base_object_id 400 INVALID_SPEC",
+                bad1.status == 400 && bad1.body.contains("INVALID_SPEC"),
+                "status=" + bad1.status + " body=" + clip(bad1.body));
+
+        // 缺 version_note
+        HttpResult bad2 = httpPost(cfg, "/modification-tasks",
+                "{" + specJson("把对象改好", "ds_any", null, null) + ",\"clientRequestId\":\"" + clientReqId + "-bad2\"}");
+        check("p2.缺 version_note 400 INVALID_SPEC",
+                bad2.status == 400 && bad2.body.contains("INVALID_SPEC"),
+                "status=" + bad2.status + " body=" + clip(bad2.body));
+
+        // base_version 给旧版本：受理即拒（九决定之一）。需要一个已升过版/可先登记再升版的对象：
+        // 这里只对不存在对象给显式版本——校验顺序是对象存在性在前，断言用 MODIFICATION_TARGET_NOT_FOUND
+        HttpResult bad3 = httpPost(cfg, "/modification-tasks",
+                "{" + specJson("把对象改好", "ds_nosuch00", 1, "例行修改") + ",\"clientRequestId\":\"" + clientReqId + "-bad3\"}");
+        check("p2.基准对象不存在 400 MODIFICATION_TARGET_NOT_FOUND",
+                bad3.status == 400 && bad3.body.contains("MODIFICATION_TARGET_NOT_FOUND"),
+                "status=" + bad3.status + " body=" + clip(bad3.body));
+
+        // 受理成功与幂等：需要 --s10-object（phase 1 登记的 E 对象）作基准
+        if (cfg.s10Object().isBlank()) {
+            check("p2.受理成功段跳过（未给 --s10-object）", true, "run 段驱动器就绪后带对象重跑");
+            return;
+        }
+        HttpResult ok1 = httpPost(cfg, "/modification-tasks",
+                "{" + specJson("把收盘价整体上浮百分之十，输出同列结构 CSV", cfg.s10Object(), null, "e2e05 修改验证")
+                        + ",\"clientRequestId\":\"" + clientReqId + "\"}");
+        JsonNode ok1body = json.readTree(ok1.body);
+        String taskId = ok1body.path("taskId").asText("");
+        check("p2.受理成功 200 且 taskId 非空、status=RUNNING",
+                ok1.status == 200 && !taskId.isBlank() && "RUNNING".equals(ok1body.path("status").asText()),
+                "status=" + ok1.status + " body=" + clip(ok1.body));
+
+        HttpResult dup = httpPost(cfg, "/modification-tasks",
+                "{" + specJson("把收盘价整体上浮百分之十，输出同列结构 CSV", cfg.s10Object(), null, "e2e05 修改验证")
+                        + ",\"clientRequestId\":\"" + clientReqId + "\"}");
+        JsonNode dupBody = json.readTree(dup.body);
+        check("p2.同 clientRequestId 重发 deduplicated=true 且 taskId 一致",
+                dup.status == 200 && dupBody.path("deduplicated").asBoolean(false)
+                        && taskId.equals(dupBody.path("taskId").asText()),
+                "status=" + dup.status + " body=" + clip(dup.body));
+
+        HttpResult q = httpGet(cfg, "/modification-tasks/" + taskId);
+        JsonNode qBody = json.readTree(q.body);
+        check("p2.查询可见 runId（受理已拉起运行）",
+                q.status == 200 && !qBody.path("runId").asText("").isBlank(),
+                "status=" + q.status + " body=" + clip(q.body));
+        evidence.append("[P2-TASK] taskId=").append(taskId)
+                .append(" runId=").append(qBody.path("runId").asText())
+                .append("（run 段驱动器接管后续断言）\n");
+    }
+
+    /** 组装 specJson 字符串值（base/version/note 任一可为 null 表示不写该键）。 */
+    private static String specJson(String instruction, String baseObjectId, Integer baseVersion,
+                                   String versionNote) {
+        StringBuilder sb = new StringBuilder("\"specJson\":\"{");
+        sb.append("\\\"instruction\\\":\\\"").append(instruction).append("\\\"");
+        if (baseObjectId != null) {
+            sb.append(",\\\"base_object_id\\\":\\\"").append(baseObjectId).append("\\\"");
+        }
+        if (baseVersion != null) {
+            sb.append(",\\\"base_version\\\":").append(baseVersion);
+        }
+        if (versionNote != null) {
+            sb.append(",\\\"version_note\\\":\\\"").append(versionNote).append("\\\"");
+        }
+        sb.append("}\"");
+        return sb.toString();
     }
 
     // ══════════════ phase 3：S10 滚动存活实证（贝克 mounts apply 后） ══════════════
