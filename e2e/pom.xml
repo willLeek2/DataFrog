@@ -5,11 +5,12 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>world.willfrog</groupId>
-    <artifactId>datafrog-014data01-e2e</artifactId>
+    <artifactId>datafrog-014data04-e2e</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
-    <name>014-data-01 Beta 泳道验收消费端</name>
-    <description>本机 Dubbo 消费端，tri 直连泳道实例跑 DataObjectService 十个 rpc 的五组验收用例。不在 DataFrog 仓库内，不污染送审分支。</description>
+    <name>014-data-04 Beta 泳道验收断言程序</name>
+    <description>本机 Dubbo 消费端，tri 直连泳道实例跑 DataObjectService 十三个 rpc 的断言
+        （c1/c2/c2b/c3/c5 + c4 三情形分 phase）。不在 DataFrog 送审分支上。</description>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
@@ -19,10 +20,13 @@
     </properties>
 
     <dependencies>
-        <!-- DataFrog 契约（proto 生成的 triple stub）。本分支基于送审头 d7e7752，聚合构建
-             （mvn package -pl e2e -am）时 datafrog-api 由 reactor 从本仓源码构建，
-             不经过任何机器 .m2 的 0.1.0-SNAPSHOT 旧构件（该坐标会被其他分支的
-             install 覆盖，260926 实测踩过）。 -->
+        <!-- DataFrog 契约（proto 生成的 triple stub）。本分支（基于 01 的 e2e 分支）源码里的
+             datafrog-api 只有 01 的十个 rpc，缺 04 的过滤组/freshness/断言/ReadObjectData——
+             在本分支 reactor 构建（-pl e2e -am）会拿错 api。本机构建必须先从 04 送审分支
+             worktree（dacc2eb）跑 ./mvnw -pl datafrog-api install 把 04 版装进 .m2，再
+             ./mvnw -f e2e/pom.xml package 独立构建本模块。Beta 机上若源码树本身是 04 分支
+             加本 e2e 目录，则 reactor ./mvnw -pl e2e -am package 可用（api 是 04 版）。
+             注意 0.1.0-SNAPSHOT 坐标被各分支共用，.m2 里的版本取决于最后一次 install。 -->
         <dependency>
             <groupId>world.willfrog</groupId>
             <artifactId>datafrog-api</artifactId>
@@ -41,12 +45,24 @@
     </dependencies>
 
     <build>
-        <finalName>e2e-014data01</finalName>
+        <finalName>e2e-014data04</finalName>
         <plugins>
+            <!-- 本模块是独立 pom（不继承仓库根 pom），默认插件版本在离线环境不可解析，
+                 与根 pom 对齐固定版本（构建机 .m2 已有缓存）。 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-                <version>3.5.1</version>
+                <version>3.5.0</version>
                 <executions>
                     <execution>
                         <phase>package</phase>

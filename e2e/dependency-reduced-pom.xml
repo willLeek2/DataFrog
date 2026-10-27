@@ -2,16 +2,25 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <groupId>world.willfrog</groupId>
-  <artifactId>datafrog-014data01-e2e</artifactId>
-  <name>014-data-01 Beta 泳道验收消费端</name>
+  <artifactId>datafrog-014data04-e2e</artifactId>
+  <name>014-data-04 Beta 泳道验收断言程序</name>
   <version>0.1.0-SNAPSHOT</version>
-  <description>本机 Dubbo 消费端，tri 直连泳道实例跑 DataObjectService 十个 rpc 的五组验收用例。不在 DataFrog 仓库内，不污染送审分支。</description>
+  <description>本机 Dubbo 消费端，tri 直连泳道实例跑 DataObjectService 十三个 rpc 的断言
+        （c1/c2/c2b/c3/c5 + c4 三情形分 phase）。不在 DataFrog 送审分支上。</description>
   <build>
-    <finalName>e2e-014data01</finalName>
+    <finalName>e2e-014data04</finalName>
     <plugins>
       <plugin>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+      </plugin>
+      <plugin>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.2</version>
+      </plugin>
+      <plugin>
         <artifactId>maven-shade-plugin</artifactId>
-        <version>3.5.1</version>
+        <version>3.5.0</version>
         <executions>
           <execution>
             <phase>package</phase>
