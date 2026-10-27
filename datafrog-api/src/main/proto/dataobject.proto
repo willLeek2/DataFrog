@@ -6,6 +6,7 @@ package world.willfrog.datafrog.idl;
 
 // 014-data-01 数据对象存储模块的对外契约。业务流量全走 Dubbo（骨架阶段不引入 web 依赖，
 // HTTP 入口与鉴权归 014-data-06 的对外接口层）。
+// 014-data-04 增量：ListDataObjects 过滤组、freshness 查询、可用性断言、ReadObjectData 分页读取（各条目注释）。
 // 业务失败不用异常表达：所有应答携带 ResultInfo，失败时给可机读错误码（架构篇对外接口节口径）。
 // 字段口径对应《数据规范与约定》：交易日=东八区零点毫秒、事件时刻=UTC 毫秒、
 // 覆盖区间=YYYY-MM-DD、id=ds_ 加 8 位十六进制、语义定义=sd_ 加名称加 _v 加整数。
@@ -20,7 +21,8 @@ service DataObjectService {
   rpc DeleteDataObject(DeleteDataObjectRequest) returns (DeleteDataObjectResponse);
   // 读取登记卡；水位与覆盖字段为当前 ACTIVE 版本行的读取时投影。
   rpc GetDataObject(GetDataObjectRequest) returns (GetDataObjectResponse);
-  // 纯分页枚举；按数据域、字段、时间的过滤归 014-data-04 的完整查询面。
+  // 枚举（014-data-04 起带可选过滤组，全留空=纯分页）。page_token 是偏移量：同一组过滤条件内
+  // 可接着翻页；调用方改了任何过滤条件必须用空 token 从第一页重查；服务端不把过滤条件编进 token。
   rpc ListDataObjects(ListDataObjectsRequest) returns (ListDataObjectsResponse);
   // 语义定义登记：name+version 唯一，重复注册返回 DEFINITION_ALREADY_EXISTS。
   rpc RegisterSemanticDefinition(RegisterSemanticDefinitionRequest) returns (RegisterSemanticDefinitionResponse);
@@ -28,6 +30,18 @@ service DataObjectService {
   rpc ListSemanticDefinitions(ListSemanticDefinitionsRequest) returns (ListSemanticDefinitionsResponse);
   // 导出：服务端按规范篇第 10 节落导出文件（分片与 zip 按声明配置），应答只回分片清单不回文件字节。
   rpc ExportDataObject(ExportDataObjectRequest) returns (ExportDataObjectResponse);
+  // 014-data-04：新鲜度查询。三种情形（连续完整日两列由 03 写入、04 只读）：
+  // 两列都空→ok、日期空、has_gap 假、note「还没有连续完整日」；
+  // 日期有值且 has_gap 假→返回日期、不附补数说明；
+  // 日期有值且 has_gap 真→返回空档、note 说明下一轮从连续完整日的下一个开市日起补（消费方按 01302 开市日日历推具体日期）。
+  rpc GetDataObjectFreshness(GetDataObjectFreshnessRequest) returns (GetDataObjectFreshnessResponse);
+  // 014-data-04：可用性断言逐条详单（结果现算不落库）。认不出的断言类型不算通过（reason=unknown_type）；
+  // depends_on 遇环或深度到限只判那一条不通过（reason=cycle_detected / depth_limit），同对象其余断言继续算。
+  rpc GetAvailabilityAssertions(GetAvailabilityAssertionsRequest) returns (GetAvailabilityAssertionsResponse);
+  // 014-data-04：按版本读已入库内容的一段字节（对象数据进沙箱的主通道）。part 按文件名升序流式返回，
+  // 与版本行 content_checksum 的拼接定义同序；调用方拼完整字节后自行算 sha256 校验。
+  // 只读不写：不重算水位、不触碰导出目录；导出仍走 ExportDataObject。
+  rpc ReadObjectData(ReadObjectDataRequest) returns (ReadObjectDataResponse);
 }
 
 // 业务结果信封：ok=false 时 code 与 message 必填；ok=true 时忽略后两者。
@@ -94,6 +108,16 @@ enum Visibility {
   OWNER_VISIBLE = 2;
 }
 
+// 可用性断言汇总（014-data-04）。卡片与详单应答用它；过滤组里 UNKNOWN=不加该条件。
+// coverage_end_at_or_after 通过只说明覆盖终点到了指定日，不等于中间没有空洞（连续性看 freshness）。
+enum AssertionStatus {
+  ASSERTION_STATUS_UNKNOWN = 0;
+  NO_ASSERTIONS = 1;
+  PASS = 2;
+  PARTIAL = 3;
+  FAIL = 4;
+}
+
 enum DefinitionStatus {
   DEFINITION_STATUS_UNKNOWN = 0;
   ACTIVE = 1;
@@ -136,6 +160,8 @@ message DataObjectCard {
   string coverage_start = 22;
   string coverage_end = 23;
   string content_checksum = 24;
+  // 可用性断言汇总（现算；未登记断言=NO_ASSERTIONS）。
+  AssertionStatus assertion_status = 25;
 }
 
 message SemanticDefinitionCard {
@@ -177,6 +203,8 @@ message RegisterDataObjectRequest {
   string coverage_end = 18;
   // 首个版本的内容，UTF-8 CSV 文本（首行表头，规范篇第 10 节口径）。
   bytes csv_content = 19;
+  // 可用性断言（可选，014-data-04）：登记时声明的检查条件，存对象行 assertions 列。
+  repeated AssertionSpec assertions = 20;
 }
 
 message RegisterDataObjectResponse {
@@ -232,8 +260,24 @@ message GetDataObjectResponse {
 
 message ListDataObjectsRequest {
   int32 page_size = 1;
-  // 分页游标：首页留空，后续传上页应答的 next_page_token。
+  // 分页游标：首页留空，后续传上页应答的 next_page_token（偏移量口径，见 service 注释）。
   string page_token = 2;
+  // 过滤组（014-data-04，全部可选、全留空=纯分页）。对象行条件在 SQL 直接过滤；
+  // 时间/新鲜度条件经 JOIN 当前 ACTIVE 版本行下推；断言状态过滤在服务层现算滤完再按偏移切页。
+  // 数据域：语义定义 name 前缀匹配，命中对象挂靠的 semantic_refs。
+  string filter_semantic_name = 3;
+  // 字段：对象挂靠的语义定义的字段集包含该字段名即命中。
+  string filter_field_name = 4;
+  // 覆盖范围描述子串。
+  string filter_coverage_scope_substring = 5;
+  // 时间覆盖区间（YYYY-MM-DD）：coverage_start >= 此值。
+  string filter_coverage_start_from = 6;
+  // 时间覆盖区间（YYYY-MM-DD）：coverage_end <= 此值。
+  string filter_coverage_end_to = 7;
+  // 新鲜度（YYYY-MM-DD）：coverage_end >= 此值。
+  string filter_freshness_since = 8;
+  // 可用性断言汇总状态（UNKNOWN=不加该条件）。
+  AssertionStatus filter_assertion_status = 9;
 }
 
 message ListDataObjectsResponse {
@@ -301,4 +345,69 @@ message ExportDataObjectResponse {
   string aggregate_checksum = 4;
   // 导出目录（服务端数据根下的相对路径）；同一对象同一版本重复导出时覆盖此目录，不另起一份。
   string export_dir = 5;
+}
+
+// 断言声明（登记时写入对象行 assertions 列）。v1 三类：
+// coverage_end_at_or_after（date_value）/ row_count_at_least（count_value）/ depends_on_objects_pass（depends_on）。
+// type 用字符串：将来扩充新类型时旧数据可原样存读；认不出的类型不算通过。
+message AssertionSpec {
+  string type = 1;
+  string date_value = 2;
+  int64 count_value = 3;
+  repeated string depends_on = 4;
+}
+
+// 断言逐条现算结果（GetAvailabilityAssertions 应答）。
+message AssertionDetail {
+  AssertionSpec spec = 1;
+  bool passed = 2;
+  // 实际值对照说明（实际 coverage_end / 实际 row_count / 各依赖对象的汇总状态）。
+  string actual = 3;
+  // 未通过原因：unknown_type / cycle_detected / depth_limit / dependency_missing 等；通过时为空。
+  string reason = 4;
+}
+
+message GetDataObjectFreshnessRequest {
+  string object_id = 1;
+}
+
+message GetDataObjectFreshnessResponse {
+  ResultInfo result = 1;
+  // 数据覆盖日期（当前 ACTIVE 版本行投影）。
+  string coverage_end = 2;
+  // 连续完整日（版本行两列，03 写入；两列都空表示还没有成功开市日或 03 尚未写入）。
+  string continuous_complete_date = 3;
+  // 连续完整日之后有无空洞（两列都空时为假）。
+  bool has_gap_after_watermark = 4;
+  // 三种情形的说明文字（见 service 注释）；日期有值且无空洞时为空。
+  string note = 5;
+  AssertionStatus assertion_status = 6;
+}
+
+message GetAvailabilityAssertionsRequest {
+  string object_id = 1;
+}
+
+message GetAvailabilityAssertionsResponse {
+  ResultInfo result = 1;
+  repeated AssertionDetail details = 2;
+  AssertionStatus assertion_status = 3;
+}
+
+message ReadObjectDataRequest {
+  string object_id = 1;
+  // 0 表示当前 ACTIVE 版本。
+  int32 version = 2;
+  // 分页游标：首页留空，后续传上页应答的 next_page_token（服务端编码 part 序号与段内偏移）。
+  string page_token = 3;
+  // 请求段大小（字节）；服务端按上限钳制（超出取上限值）。
+  int32 page_size = 4;
+}
+
+message ReadObjectDataResponse {
+  ResultInfo result = 1;
+  // 该版本已入库内容的一段字节；part 按文件名升序（与版本行 content_checksum 的拼接定义同序）。
+  bytes data = 2;
+  // 空串=已读完。
+  string next_page_token = 3;
 }
