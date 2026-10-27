@@ -83,6 +83,8 @@ public interface DataObjectVersionMapper {
                 content_path AS "contentPath", part_count AS "partCount",
                 part_checksums::text AS "partChecksumsJson", row_count AS "rowCount",
                 coverage_end AS "coverageEnd", content_checksum AS "contentChecksum",
+                continuous_complete_date AS "continuousCompleteDate",
+                has_gap_after_watermark AS "hasGapAfterWatermark",
                 status AS "status", created_at AS "createdAt", watermark_updated_at AS "watermarkUpdatedAt",
                 content_purged_at AS "contentPurgedAt"
             FROM datafrog_object_version WHERE object_id = #{objectId} ORDER BY version DESC
