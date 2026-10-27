@@ -265,6 +265,65 @@ public class ContentStorageService {
         }
     }
 
+    /** 按文件名升序给定的 parquet part 解表结果：列名与全字符串化的行值。 */
+    public record ParquetRows(List<String> header, List<String[]> rows) {
+    }
+
+    /**
+     * 把按文件名升序给定的 parquet part 字节逐个解成表（014-data-05 条件筛选执行段；
+     * bob 节点 c b672fb4e 裁定的读取方式）。入库 part 是 parquet 不是 CSV 文本，执行段
+     * 求值前必须经这里解表，不能按文本猜。
+     *
+     * 与写入时同一套 DuckDB：字节先落临时文件，read_parquet 读回；值经 getString 全部
+     * 字符串化（DECIMAL/DATE 等类型按 JDBC 展示形态，调用方按字符串口径求值）；列名即
+     * 写入时 CSV 表头列名（writePart 原样保留）。逐 part 解、行序拼接，不合并成一次
+     * 查询；part 间列名必须一致（追加路径写 part 前校验过同列序），不一致如实抛错。
+     */
+    public ParquetRows readParquetRows(List<byte[]> partsInOrder) {
+        Path tmpDir;
+        try {
+            tmpDir = Files.createTempDirectory("df-condfilter-");
+        } catch (IOException e) {
+            throw new IllegalStateException("创建临时目录失败: " + e.getMessage(), e);
+        }
+        try (Connection conn = duckdb()) {
+            List<String> header = null;
+            List<String[]> rows = new ArrayList<>();
+            for (int i = 0; i < partsInOrder.size(); i++) {
+                Path partFile = tmpDir.resolve(String.format("part-%06d.parquet", i + 1));
+                Files.write(partFile, partsInOrder.get(i));
+                String source = "read_parquet(" + sqlString(partFile) + ")";
+                List<String> columns = columnNames(conn, source);
+                if (header == null) {
+                    header = columns;
+                } else if (!header.equals(columns)) {
+                    throw new IllegalStateException("part 之间列名不一致，无法合并求值: "
+                            + header + " vs " + columns);
+                }
+                try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery(
+                        "SELECT * FROM " + source)) {
+                    while (rs.next()) {
+                        String[] row = new String[columns.size()];
+                        for (int c = 0; c < columns.size(); c++) {
+                            row[c] = rs.getString(c + 1);
+                        }
+                        rows.add(row);
+                    }
+                }
+            }
+            if (header == null) {
+                throw new IllegalStateException("对象没有内容文件");
+            }
+            return new ParquetRows(header, rows);
+        } catch (SQLException e) {
+            throw new IllegalStateException("parquet part 解表失败: " + e.getMessage(), e);
+        } catch (IOException e) {
+            throw new IllegalStateException("parquet part 临时文件写入失败: " + e.getMessage(), e);
+        } finally {
+            deleteTreeQuietly(tmpDir);
+        }
+    }
+
     /**
      * 导出目录公式（纯计算零副作用）：数据根/&lt;objectId&gt;/export/v&lt;version&gt;。
      * 导出写入（exportCsv）与 HTTP 下载通道（httpapi.ExportFileSupport）共用这一个公式来源，
@@ -578,6 +637,21 @@ public class ContentStorageService {
             } catch (IOException ignored) {
                 // 临时文件清理失败不影响主流程
             }
+        }
+    }
+
+    /** 临时目录树清理（倒序删，目录不存在视为已清理）。 */
+    private static void deleteTreeQuietly(Path dir) {
+        try (Stream<Path> s = Files.walk(dir)) {
+            s.sorted(Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (IOException ignored) {
+                    // 临时文件清理失败不影响主流程
+                }
+            });
+        } catch (IOException e) {
+            // 目录不存在视为已清理
         }
     }
 

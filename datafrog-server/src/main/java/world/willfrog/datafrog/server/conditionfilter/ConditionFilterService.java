@@ -6,9 +6,9 @@ import org.springframework.stereotype.Service;
 import world.willfrog.datafrog.server.httpapi.VisibilityGuard;
 import world.willfrog.datafrog.server.objectdata.domain.AssertionStatus;
 import world.willfrog.datafrog.server.objectdata.repo.DataObjectMapper;
+import world.willfrog.datafrog.server.objectdata.service.ContentStorageService;
 import world.willfrog.datafrog.server.objectdata.service.DataObjectRegistryService;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -30,8 +30,8 @@ import java.util.Map;
  *   不写「对象不可见」，与「没有挂靠对象」同一句表述——不给人拿股票池探测对象是否存在。
  *
  * 方案没逐字写到的读法（解释性决定，送节点 c 审查时逐条列明）：
- * - 列映射：semantic_name 与数据 CSV 表头列名等值（与「语义定义就是字段级语义单元」的
- *   04 注释同口径）。
+ * - 列映射：semantic_name 与数据的列名等值——parquet 列名即写入时 CSV 表头列名
+ *   （writePart 原样保留），与「语义定义就是字段级语义单元」的 04 注释同口径。
  * - 标的列：对象登记的主键首列（01 契约既有字段，不自造列名约定）；主键空或首列不在
  *   表头，该对象上所有标的未命中。
  * - 日期列：表头中名为 trade_date 或 date 的首列（主仓库数据集惯例列名）；条件带
@@ -91,10 +91,13 @@ public class ConditionFilterService {
     }
 
     private final DataObjectRegistryService registry;
+    private final ContentStorageService contentStore;
     private final VisibilityGuard visibilityGuard;
 
-    public ConditionFilterService(DataObjectRegistryService registry, VisibilityGuard visibilityGuard) {
+    public ConditionFilterService(DataObjectRegistryService registry, ContentStorageService contentStore,
+                                  VisibilityGuard visibilityGuard) {
         this.registry = registry;
+        this.contentStore = contentStore;
         this.visibilityGuard = visibilityGuard;
     }
 
@@ -175,12 +178,16 @@ public class ConditionFilterService {
     }
 
     /**
-     * 读对象全量内容并解析成快照：readObjectData 翻页到读完（页不跨 part，拼接时页与页
-     * 之间不做行边界处理——part 文件是整段 CSV 文本，行可能跨页出现，拼完再整体解析）。
-     * 表头首行为列名（剥 BOM）；标的列=主键首列，日期列=trade_date/date 首个命中。
+     * 读对象全量内容并解析成快照（bob 节点 c b672fb4e 裁定的读取方式）：readObjectData
+     * 翻页读全（页不跨 part），按 partIndex 分组把同一 part 的页拼回该 part 的完整字节；
+     * 全部 part 按序拼接算 sha256，与版本行 content_checksum（写入时全部 part 按文件名
+     * 升序拼接的 sha256，partIndex 升序即文件名升序）核对——对不上说明读取不全或对象在
+     * 读取间隙被改动，该对象失败不求值，不出错误结论；对上之后经存储层把 parquet 逐
+     * part 解成表（入库 part 是 parquet，不是 CSV 文本，不能按文本猜）。标的列=主键首列，
+     * 日期列=trade_date/date 首个命中。
      */
     private ObjectDataSnapshot readSnapshot(DataObjectRegistryService.CardView card) {
-        StringBuilder text = new StringBuilder();
+        java.util.TreeMap<Integer, java.io.ByteArrayOutputStream> parts = new java.util.TreeMap<>();
         String pageToken = "";
         long totalBytes = 0;
         do {
@@ -191,16 +198,22 @@ public class ConditionFilterService {
                 throw new IllegalStateException(
                         "对象数据超出条件筛选读取上限 " + (MAX_OBJECT_BYTES / 1024 / 1024) + "MB");
             }
-            text.append(new String(page.data(), StandardCharsets.UTF_8));
+            parts.computeIfAbsent(page.partIndex(), k -> new java.io.ByteArrayOutputStream())
+                    .writeBytes(page.data());
             pageToken = page.nextPageToken();
         } while (!pageToken.isBlank());
 
-        List<String[]> parsed = CsvSupport.parse(text.toString());
-        if (parsed.isEmpty()) {
-            throw new IllegalStateException("对象内容为空，没有表头");
+        List<byte[]> ordered = new ArrayList<>();
+        for (java.io.ByteArrayOutputStream buffer : parts.values()) {
+            ordered.add(buffer.toByteArray());
         }
-        List<String> header = List.of(parsed.get(0));
-        List<String[]> rows = parsed.subList(1, parsed.size());
+        String actual = sha256Hex(ordered);
+        if (!actual.equalsIgnoreCase(card.contentChecksum())) {
+            throw new IllegalStateException("对象内容校验不符（读到的字节与版本行 content_checksum "
+                    + "不一致，可能读取不全或对象已被改动），不求值: " + card.object().id());
+        }
+        ContentStorageService.ParquetRows table = contentStore.readParquetRows(ordered);
+        List<String> header = table.header();
 
         List<String> primaryKey = card.object().primaryKey();
         String keyColumn = primaryKey == null || primaryKey.isEmpty() ? null : primaryKey.get(0);
@@ -212,7 +225,25 @@ public class ConditionFilterService {
                 break;
             }
         }
-        return new ObjectDataSnapshot(header, rows, symbolColumn, dateColumn);
+        return new ObjectDataSnapshot(header, table.rows(), symbolColumn, dateColumn);
+    }
+
+    /** 逐 part 流式算 sha256（与版本行 content_checksum 的拼接定义同口径，不整读）。 */
+    private static String sha256Hex(List<byte[]> partsInOrder) {
+        java.security.MessageDigest digest;
+        try {
+            digest = java.security.MessageDigest.getInstance("SHA-256");
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 不可用", e);
+        }
+        for (byte[] part : partsInOrder) {
+            digest.update(part);
+        }
+        StringBuilder hex = new StringBuilder();
+        for (byte b : digest.digest()) {
+            hex.append(String.format("%02x", b));
+        }
+        return hex.toString();
     }
 
     /** 单个标的的求值：逐条件推进，首个不满足即记 miss；全部满足记 hit。 */
@@ -405,82 +436,4 @@ public class ConditionFilterService {
         return row[column];
     }
 
-    /**
-     * 标准 CSV 解析（RFC 4180 口径的子集）：双引号字段内的逗号合法，引号转义是双引号；
-     * 表头与数据行都按同一解析器走。数据由平台 writePart 写入，格式可控，这里不做
-     * 容错猜测（比如未闭合引号）——按原文逐字符解析，异常形态自然产出空段。
-     */
-    static final class CsvSupport {
-
-        private CsvSupport() {
-        }
-
-        static List<String[]> parse(String text) {
-            List<String[]> rows = new ArrayList<>();
-            List<String> fields = new ArrayList<>();
-            StringBuilder current = new StringBuilder();
-            boolean inQuotes = false;
-            boolean fieldStarted = false;
-            int i = 0;
-            int n = text.length();
-            while (i < n) {
-                char c = text.charAt(i);
-                if (inQuotes) {
-                    if (c == '"') {
-                        if (i + 1 < n && text.charAt(i + 1) == '"') {
-                            current.append('"');
-                            i += 2;
-                            continue;
-                        }
-                        inQuotes = false;
-                        i++;
-                        continue;
-                    }
-                    current.append(c);
-                    i++;
-                    continue;
-                }
-                if (c == '"' && current.isEmpty() && !fieldStarted) {
-                    inQuotes = true;
-                    fieldStarted = true;
-                    i++;
-                    continue;
-                }
-                if (c == ',') {
-                    fields.add(current.toString());
-                    current.setLength(0);
-                    fieldStarted = false;
-                    i++;
-                    continue;
-                }
-                if (c == '\n' || c == '\r') {
-                    // \r\n 合并按一个行尾处理
-                    if (c == '\r' && i + 1 < n && text.charAt(i + 1) == '\n') {
-                        i++;
-                    }
-                    fields.add(current.toString());
-                    current.setLength(0);
-                    fieldStarted = false;
-                    rows.add(fields.toArray(new String[0]));
-                    fields = new ArrayList<>();
-                    i++;
-                    continue;
-                }
-                current.append(c);
-                fieldStarted = true;
-                i++;
-            }
-            // 末行无换行符的残留（空文本或只有换行时不产出空行）
-            if (!fields.isEmpty() || current.length() > 0) {
-                fields.add(current.toString());
-                rows.add(fields.toArray(new String[0]));
-            }
-            // 剥表头 BOM（UTF-8 带签名写入的文件首个字段名会带 U+FEFF）
-            if (!rows.isEmpty() && rows.get(0).length > 0
-                    && rows.get(0)[0] != null && rows.get(0)[0].startsWith("﻿")) {
-                rows.get(0)[0] = rows.get(0)[0].substring(1);
-            }
-            return rows;
-        }
-    }
 }
