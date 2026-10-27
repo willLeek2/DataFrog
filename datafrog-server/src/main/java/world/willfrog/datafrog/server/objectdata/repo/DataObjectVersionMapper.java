@@ -7,7 +7,7 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 /**
- * 数据对象版本行。水位三件（row_count、coverage_end、content_checksum）的唯一更新入口是
+ * 数据对象版本行。数据覆盖三件（row_count、coverage_end、content_checksum）的唯一更新入口是
  * {@link #advanceWatermark}，追加 part 后调用：三件一起推进，同时把新 part 的 sha256
  * 追加进 part_checksums、part_count 递增——不存在绕过它的第二写入口。
  */
@@ -27,7 +27,7 @@ public interface DataObjectVersionMapper {
                @Param("now") long now);
 
     /**
-     * 版本行插入时不落 part（先有行再有内容落盘）；part 落盘成功后由本方法推进水位。
+     * 版本行插入时不落 part（先有行再有内容落盘）；part 落盘成功后由本方法推进数据覆盖事实。
      * newPartChecksum 传 JSON 编码后的标量（即带双引号的 sha256 串），拼接用 JSONB 的 || 操作符。
      */
     @Update("""
@@ -51,6 +51,8 @@ public interface DataObjectVersionMapper {
                 content_path AS "contentPath", part_count AS "partCount",
                 part_checksums::text AS "partChecksumsJson", row_count AS "rowCount",
                 coverage_end AS "coverageEnd", content_checksum AS "contentChecksum",
+                continuous_complete_date AS "continuousCompleteDate",
+                has_gap_after_watermark AS "hasGapAfterWatermark",
                 status AS "status", created_at AS "createdAt", watermark_updated_at AS "watermarkUpdatedAt"
             FROM datafrog_object_version WHERE object_id = #{objectId} AND version = #{version}
             """)
@@ -62,6 +64,8 @@ public interface DataObjectVersionMapper {
                 content_path AS "contentPath", part_count AS "partCount",
                 part_checksums::text AS "partChecksumsJson", row_count AS "rowCount",
                 coverage_end AS "coverageEnd", content_checksum AS "contentChecksum",
+                continuous_complete_date AS "continuousCompleteDate",
+                has_gap_after_watermark AS "hasGapAfterWatermark",
                 status AS "status", created_at AS "createdAt", watermark_updated_at AS "watermarkUpdatedAt"
             FROM datafrog_object_version
             WHERE object_id = #{objectId} AND status = 'ACTIVE'

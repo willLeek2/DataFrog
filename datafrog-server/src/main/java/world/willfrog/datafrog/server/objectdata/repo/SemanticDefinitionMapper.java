@@ -5,7 +5,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
-/** 语义定义表。(name, version) 主键：重复注册由唯一约束兜底，服务层先查先报友好错误码。 */
+/** 语义定义表。(name, version) 主键：重复注册由唯一约束拦下，服务层先查先报友好错误码。 */
 @Mapper
 public interface SemanticDefinitionMapper {
 

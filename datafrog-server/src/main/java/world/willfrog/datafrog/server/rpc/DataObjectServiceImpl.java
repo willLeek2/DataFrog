@@ -1,10 +1,14 @@
 package world.willfrog.datafrog.server.rpc;
 
+import com.google.protobuf.ByteString;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.stereotype.Service;
 import world.willfrog.datafrog.idl.Adjustment;
 import world.willfrog.datafrog.idl.AppendToObjectRequest;
 import world.willfrog.datafrog.idl.AppendToObjectResponse;
+import world.willfrog.datafrog.idl.AssertionDetail;
+import world.willfrog.datafrog.idl.AssertionSpec;
+import world.willfrog.datafrog.idl.AssertionStatus;
 import world.willfrog.datafrog.idl.Ccy;
 import world.willfrog.datafrog.idl.CreateNewVersionRequest;
 import world.willfrog.datafrog.idl.CreateNewVersionResponse;
@@ -19,6 +23,10 @@ import world.willfrog.datafrog.idl.ExportDataObjectResponse;
 import world.willfrog.datafrog.idl.ExportShard;
 import world.willfrog.datafrog.idl.Frequency;
 import world.willfrog.datafrog.idl.GenMethod;
+import world.willfrog.datafrog.idl.GetAvailabilityAssertionsRequest;
+import world.willfrog.datafrog.idl.GetAvailabilityAssertionsResponse;
+import world.willfrog.datafrog.idl.GetDataObjectFreshnessRequest;
+import world.willfrog.datafrog.idl.GetDataObjectFreshnessResponse;
 import world.willfrog.datafrog.idl.GetDataObjectRequest;
 import world.willfrog.datafrog.idl.GetDataObjectResponse;
 import world.willfrog.datafrog.idl.GetSemanticDefinitionRequest;
@@ -27,6 +35,8 @@ import world.willfrog.datafrog.idl.ListDataObjectsRequest;
 import world.willfrog.datafrog.idl.ListDataObjectsResponse;
 import world.willfrog.datafrog.idl.ListSemanticDefinitionsRequest;
 import world.willfrog.datafrog.idl.ListSemanticDefinitionsResponse;
+import world.willfrog.datafrog.idl.ReadObjectDataRequest;
+import world.willfrog.datafrog.idl.ReadObjectDataResponse;
 import world.willfrog.datafrog.idl.RegisterDataObjectRequest;
 import world.willfrog.datafrog.idl.RegisterDataObjectResponse;
 import world.willfrog.datafrog.idl.RegisterSemanticDefinitionRequest;
@@ -36,6 +46,7 @@ import world.willfrog.datafrog.idl.SemanticDefinitionCard;
 import world.willfrog.datafrog.idl.SemanticRef;
 import world.willfrog.datafrog.idl.SourceType;
 import world.willfrog.datafrog.idl.Visibility;
+import world.willfrog.datafrog.server.objectdata.repo.DataObjectMapper;
 import world.willfrog.datafrog.server.objectdata.repo.SemanticDefinitionRow;
 import world.willfrog.datafrog.server.objectdata.service.ContentStorageService;
 import world.willfrog.datafrog.server.objectdata.service.DataObjectRegistryService;
@@ -93,7 +104,11 @@ public class DataObjectServiceImpl extends DubboDataObjectServiceTriple.DataObje
                     request.getCompression(),
                     request.getCoverageStart(),
                     request.getCoverageEnd(),
-                    request.getCsvContent().toByteArray());
+                    request.getCsvContent().toByteArray(),
+                    request.getAssertionsList().stream()
+                            .map(a -> new world.willfrog.datafrog.server.objectdata.domain.AssertionSpec(
+                                    a.getType(), a.getDateValue(), a.getCountValue(), a.getDependsOnList()))
+                            .toList());
             return RegisterDataObjectResponse.newBuilder()
                     .setResult(ok())
                     .setCard(toCard(registry.register(cmd)))
@@ -157,7 +172,21 @@ public class DataObjectServiceImpl extends DubboDataObjectServiceTriple.DataObje
         try {
             int offset = offsetOf(request.getPageToken());
             int size = pageSizeOf(request.getPageSize());
-            DataObjectRegistryService.ListPage page = registry.list(size, offset);
+            // 过滤组全留空=01 纯分页行为（直查 listActive）；有任一条件走过滤面。
+            // 断言状态过滤在 service 层现算（结论不落库），token 仍是偏移量、不编码过滤条件。
+            DataObjectMapper.ListFilters filters = new DataObjectMapper.ListFilters(
+                    request.getFilterSemanticName(),
+                    request.getFilterFieldName(),
+                    request.getFilterCoverageScopeSubstring(),
+                    request.getFilterCoverageStartFrom(),
+                    request.getFilterCoverageEndTo(),
+                    request.getFilterFreshnessSince(),
+                    request.getFilterOwner());
+            world.willfrog.datafrog.server.objectdata.domain.AssertionStatus statusFilter =
+                    statusFilterOf(request.getFilterAssertionStatus());
+            DataObjectRegistryService.ListPage page = filters.isEmpty() && statusFilter == null
+                    ? registry.list(size, offset)
+                    : registry.list(filters, statusFilter, size, offset);
             ListDataObjectsResponse.Builder b = ListDataObjectsResponse.newBuilder().setResult(ok());
             for (DataObjectRegistryService.CardView view : page.cards()) {
                 b.addCards(toCard(view));
@@ -243,6 +272,59 @@ public class DataObjectServiceImpl extends DubboDataObjectServiceTriple.DataObje
         }
     }
 
+    // 014-data-04：freshness 查询（三种情形的 note 文案见 service 注释）。
+    @Override
+    public GetDataObjectFreshnessResponse getDataObjectFreshness(GetDataObjectFreshnessRequest request) {
+        try {
+            DataObjectRegistryService.FreshnessView view = registry.freshness(request.getObjectId());
+            return GetDataObjectFreshnessResponse.newBuilder()
+                    .setResult(ok())
+                    .setCoverageEnd(view.coverageEnd() == null ? "" : view.coverageEnd())
+                    .setContinuousCompleteDate(view.continuousCompleteDate() == null ? "" : view.continuousCompleteDate())
+                    .setHasGapAfterWatermark(view.hasGapAfterWatermark())
+                    .setNote(view.note() == null ? "" : view.note())
+                    .setAssertionStatus(statusValue(view.assertionStatus()))
+                    .build();
+        } catch (Exception e) {
+            return GetDataObjectFreshnessResponse.newBuilder().setResult(error(e)).build();
+        }
+    }
+
+    // 014-data-04：可用性断言逐条现算详单（结果不落库）。
+    @Override
+    public GetAvailabilityAssertionsResponse getAvailabilityAssertions(GetAvailabilityAssertionsRequest request) {
+        try {
+            DataObjectRegistryService.AssertionsView view = registry.assertionsOf(request.getObjectId());
+            GetAvailabilityAssertionsResponse.Builder b = GetAvailabilityAssertionsResponse.newBuilder()
+                    .setResult(ok())
+                    .setAssertionStatus(statusValue(view.status()));
+            for (DataObjectRegistryService.AssertionOutcome outcome : view.details()) {
+                b.addDetails(toAssertionDetail(outcome));
+            }
+            return b.build();
+        } catch (Exception e) {
+            return GetAvailabilityAssertionsResponse.newBuilder().setResult(error(e)).build();
+        }
+    }
+
+    // 014-data-04：按版本读已入库内容的一段字节（对象数据进沙箱的主通道；只读不写）。
+    @Override
+    public ReadObjectDataResponse readObjectData(ReadObjectDataRequest request) {
+        try {
+            DataObjectRegistryService.DataPageView page = registry.readObjectData(
+                    request.getObjectId(), request.getVersion(), request.getPageToken(), request.getPageSize());
+            return ReadObjectDataResponse.newBuilder()
+                    .setResult(ok())
+                    .setData(ByteString.copyFrom(page.data()))
+                    .setNextPageToken(page.nextPageToken() == null ? "" : page.nextPageToken())
+                    .setPartIndex(page.partIndex())
+                    .setPartBoundaryEnd(page.partBoundaryEnd())
+                    .build();
+        } catch (Exception e) {
+            return ReadObjectDataResponse.newBuilder().setResult(error(e)).build();
+        }
+    }
+
     // ---- 枚举与信封换算 ----
 
     private static ResultInfo ok() {
@@ -298,7 +380,8 @@ public class DataObjectServiceImpl extends DubboDataObjectServiceTriple.DataObje
                 .setRowCount(view.rowCount())
                 .setCoverageStart(view.coverageStart() == null ? "" : view.coverageStart())
                 .setCoverageEnd(view.coverageEnd() == null ? "" : view.coverageEnd())
-                .setContentChecksum(view.contentChecksum() == null ? "" : view.contentChecksum());
+                .setContentChecksum(view.contentChecksum() == null ? "" : view.contentChecksum())
+                .setAssertionStatus(statusValue(view.assertionStatus()));
         for (var ref : o.semanticRefs()) {
             b.addSemanticRefs(SemanticRef.newBuilder().setName(ref.name()).setVersion(ref.version()));
         }
@@ -309,6 +392,33 @@ public class DataObjectServiceImpl extends DubboDataObjectServiceTriple.DataObje
             b.setCcy(Ccy.valueOf(o.ccy().name()));
         }
         return b.build();
+    }
+
+    /** 断言详单：spec 原样带回（登记什么回什么，认不出的类型也原样展示），actual 给实际值对照。 */
+    private static AssertionDetail toAssertionDetail(DataObjectRegistryService.AssertionOutcome outcome) {
+        world.willfrog.datafrog.server.objectdata.domain.AssertionSpec spec = outcome.spec();
+        AssertionDetail.Builder b = AssertionDetail.newBuilder()
+                .setSpec(AssertionSpec.newBuilder()
+                        .setType(spec.type() == null ? "" : spec.type())
+                        .setDateValue(spec.dateValue() == null ? "" : spec.dateValue())
+                        .setCountValue(spec.countValue())
+                        .addAllDependsOn(spec.dependsOn() == null ? List.of() : spec.dependsOn()))
+                .setPassed(outcome.passed())
+                .setActual(outcome.actual() == null ? "" : outcome.actual())
+                .setReason(outcome.reason() == null ? "" : outcome.reason());
+        return b.build();
+    }
+
+    /** 断言状态：proto → 领域同名换算；过滤参数的 *_UNKNOWN 表示不加该条件，统一映射为 null。 */
+    private static world.willfrog.datafrog.server.objectdata.domain.AssertionStatus statusFilterOf(AssertionStatus v) {
+        return v == AssertionStatus.ASSERTION_STATUS_UNKNOWN
+                ? null
+                : world.willfrog.datafrog.server.objectdata.domain.AssertionStatus.valueOf(v.name());
+    }
+
+    /** 断言状态：领域 → proto 同名换算（应答侧始终有值，*_UNKNOWN 不会出现）。 */
+    private static AssertionStatus statusValue(world.willfrog.datafrog.server.objectdata.domain.AssertionStatus v) {
+        return v == null ? AssertionStatus.ASSERTION_STATUS_UNKNOWN : AssertionStatus.valueOf(v.name());
     }
 
     private static SemanticDefinitionCard toDefinitionCard(SemanticDefinitionRow row) {
@@ -326,20 +436,42 @@ public class DataObjectServiceImpl extends DubboDataObjectServiceTriple.DataObje
                 .build();
     }
 
+    // source_type 同为库侧非空列（bob 261028 补漏：与 visibility/frequency/gen_method 同一类，
+    // 未声明时同样按约定违例拒绝，词表 system | user；adjustment/ccy 两列允许空、保持未声明为空不动）。
     private static String srcValue(SourceType v) {
-        return v == SourceType.SOURCE_UNKNOWN ? null : v.name().toLowerCase(Locale.ROOT);
+        if (v == SourceType.SOURCE_UNKNOWN) {
+            throw new ObjectStoreExceptions.ConventionViolationException(
+                    "source_type 未声明（词表：system | user，见规范篇第 14 节）");
+        }
+        return v.name().toLowerCase(Locale.ROOT);
     }
 
+    // 014-data-04 泳道实测修：枚举声明字段（visibility/frequency/gen_method）在库里全部 NOT NULL，
+    // 此前未声明（proto3 默认 UNKNOWN）映射成 null 一路进 INSERT，炸成 INTERNAL+SQL 原文——
+    // 调用方既拿不到可读错误码，也不知道缺了哪个声明。改成 fail-closed：未声明按约定违例拒绝，
+    // 错误信息点名缺的字段与词表（规范篇第 14 节）。
     private static String visValue(Visibility v) {
-        return v == Visibility.VISIBILITY_UNKNOWN ? null : v.name().toLowerCase(Locale.ROOT);
+        if (v == Visibility.VISIBILITY_UNKNOWN) {
+            throw new ObjectStoreExceptions.ConventionViolationException(
+                    "visibility 未声明（词表：private | owner_visible，见规范篇第 14 节）");
+        }
+        return v.name().toLowerCase(Locale.ROOT);
     }
 
     private static String freqValue(Frequency v) {
-        return v == Frequency.FREQUENCY_UNKNOWN ? null : v.name().toLowerCase(Locale.ROOT);
+        if (v == Frequency.FREQUENCY_UNKNOWN) {
+            throw new ObjectStoreExceptions.ConventionViolationException(
+                    "frequency 未声明（词表：daily | single_period，见规范篇第 14 节）");
+        }
+        return v.name().toLowerCase(Locale.ROOT);
     }
 
     private static String genValue(GenMethod v) {
-        return v == GenMethod.GEN_METHOD_UNKNOWN ? null : v.name().toLowerCase(Locale.ROOT);
+        if (v == GenMethod.GEN_METHOD_UNKNOWN) {
+            throw new ObjectStoreExceptions.ConventionViolationException(
+                    "gen_method 未声明（词表：fetch | indicator | agent，见规范篇第 14 节）");
+        }
+        return v.name().toLowerCase(Locale.ROOT);
     }
 
     private static String adjValue(Adjustment v) {
