@@ -31,6 +31,9 @@ public record DataObject(
         String compression,
         String status,
         long createdAt,
-        long updatedAt
+        long updatedAt,
+        // 保留策略两键（014-data-05 方案 D6）：null = 未设置（永久保留 / 全保留，维持现状）。
+        Integer retentionDays,
+        Integer versionKeepLast
 ) {
 }

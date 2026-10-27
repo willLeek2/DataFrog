@@ -5,5 +5,7 @@ public enum CatalogAction {
     REGISTERED,
     APPENDED,
     MODIFIED,
-    DELETED
+    DELETED,
+    /** 内容物理清理（014-data-05 方案 D6）：只删内容文件不删行，actor=retention-sweeper；保留策略未启用前不会出现。 */
+    PURGED
 }

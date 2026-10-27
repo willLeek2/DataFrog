@@ -18,6 +18,8 @@ public record DataObjectVersionRow(
         Boolean hasGapAfterWatermark,
         String status,
         long createdAt,
-        long watermarkUpdatedAt
+        long watermarkUpdatedAt,
+        // 内容物理清理时刻（014-data-05 方案 D6 增列）：null = 内容文件仍在；行本身永不物理删。
+        Long contentPurgedAt
 ) {
 }

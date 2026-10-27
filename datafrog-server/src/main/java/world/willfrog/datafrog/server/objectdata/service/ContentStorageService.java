@@ -134,6 +134,34 @@ public class ContentStorageService {
         deleteQuietly(versionDir(contentPath).resolve(partFile));
     }
 
+    /**
+     * 清理执行体的存在性核验（014-data-05 方案 D7）：版本目录里是否还有 parquet part。
+     * 只看存在、不读内容——核验的合同是「该留的还在」，不是「内容还能解析」。
+     */
+    public boolean hasContentFiles(String contentPath) {
+        return !listParquetFiles(versionDir(contentPath)).isEmpty();
+    }
+
+    /**
+     * 物理清理：删除对象在数据根下的整个目录（全部版本内容与历次导出物）。
+     * 保留策略未启用（frog 未点头）前清理执行体不会走到这里；失败静默——调用方（清理
+     * 执行体）随后用存在性核验把没删干净的记成 VIOLATION，不靠异常传递结果。
+     */
+    public void deleteObjectTreeQuietly(String objectId) {
+        Path objectDir = Path.of(dataRoot, objectId);
+        try (Stream<Path> s = Files.walk(objectDir)) {
+            s.sorted(Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (IOException e) {
+                    // 静默：核验记录负责把残留暴露出来
+                }
+            });
+        } catch (IOException e) {
+            // 目录不存在视为已清理
+        }
+    }
+
     /** 追加前校验：新 CSV 的列结构必须与版本首个 part 一致（追加不升版，结构变了必须升版）。 */
     public void assertSameColumns(String contentPath, byte[] csvContent) {
         List<Path> parts = listParquetFiles(versionDir(contentPath));

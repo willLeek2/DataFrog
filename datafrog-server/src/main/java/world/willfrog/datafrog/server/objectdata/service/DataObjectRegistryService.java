@@ -60,7 +60,10 @@ public class DataObjectRegistryService {
             String coverageStart,
             String coverageEnd,
             byte[] csvContent,
-            List<AssertionSpec> assertions) {
+            List<AssertionSpec> assertions,
+            // 保留策略两键（014-data-05 方案 D6）：null = 未设置；点头前 register 上方直接拒绝非空值。
+            Integer retentionDays,
+            Integer versionKeepLast) {
     }
 
     /** 登记卡视图：对象行 + ACTIVE 版本行数据覆盖四项的读取时投影 + 断言汇总现算（014-data-04）。 */
@@ -105,6 +108,22 @@ public class DataObjectRegistryService {
     }
 
     public CardView register(RegisterCommand cmd) {
+        // 保留策略两键的校验（014-data-05 方案 D6）：非正整数的非空值一律拒绝；
+        // frog 对保留策略点头前，带任何非空值也直接拒绝（bob 补句）——空列可以先加、
+        // 空值照收（维持 01 软删先行的现状），物理删除从点头那刻起才可能发生。
+        // 点头后删掉第二道闸，把正整数接住即可，其余逻辑不变。
+        if (cmd.retentionDays() != null && cmd.retentionDays() <= 0) {
+            throw new ObjectStoreExceptions.RetentionPolicyInvalidException(
+                    "retention_days 须为正整数，收到: " + cmd.retentionDays());
+        }
+        if (cmd.versionKeepLast() != null && cmd.versionKeepLast() <= 0) {
+            throw new ObjectStoreExceptions.RetentionPolicyInvalidException(
+                    "version_keep_last 须为正整数，收到: " + cmd.versionKeepLast());
+        }
+        if (cmd.retentionDays() != null || cmd.versionKeepLast() != null) {
+            throw new ObjectStoreExceptions.RetentionPolicyInvalidException(
+                    "保留策略尚未启用：登记暂不接受 retention_days / version_keep_last（等 frog 对保留策略点头）");
+        }
         definitionService.requireAll(cmd.semanticRefs());
         List<String> missingInputs = new ArrayList<>();
         for (String input : cmd.inputs()) {
@@ -613,7 +632,7 @@ public class DataObjectRegistryService {
                 cmd.adjustment(), cmd.ccy(), 1,
                 cmd.exportFormat() == null || cmd.exportFormat().isEmpty() ? "csv" : cmd.exportFormat(),
                 cmd.compression() == null || cmd.compression().isEmpty() ? "none" : cmd.compression(),
-                "ACTIVE", now, now);
+                "ACTIVE", now, now, cmd.retentionDays(), cmd.versionKeepLast(), null);
     }
 
     private DataObject toDomain(DataObjectRow row) {
@@ -632,6 +651,6 @@ public class DataObjectRegistryService {
                 row.ccy() == null ? null
                         : world.willfrog.datafrog.server.objectdata.domain.Ccy.fromValue(row.ccy()),
                 row.currentVersion(), row.exportFormat(), row.compression(), row.status(),
-                row.createdAt(), row.updatedAt());
+                row.createdAt(), row.updatedAt(), row.retentionDays(), row.versionKeepLast());
     }
 }

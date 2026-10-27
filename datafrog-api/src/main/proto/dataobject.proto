@@ -65,6 +65,8 @@ enum ErrorCode {
   TABLES_NOT_READY = 7;
   INVALID_ARGUMENT = 8;
   INTERNAL = 9;
+  // 保留策略值非法，或保留策略尚未启用（frog 点头前带非空值登记，014-data-05 方案 D6/D12）。
+  RETENTION_POLICY_INVALID = 10;
 }
 
 enum SourceType {
@@ -162,6 +164,9 @@ message DataObjectCard {
   string content_checksum = 24;
   // 可用性断言汇总（现算；未登记断言=NO_ASSERTIONS）。
   AssertionStatus assertion_status = 25;
+  // 保留策略两键（014-data-05 方案 D6）：0 = 未设置（永久保留 / 全保留）。
+  int32 retention_days = 26;
+  int32 version_keep_last = 27;
 }
 
 message SemanticDefinitionCard {
@@ -205,6 +210,12 @@ message RegisterDataObjectRequest {
   bytes csv_content = 19;
   // 可用性断言（可选，014-data-04）：登记时声明的检查条件，存对象行 assertions 列。
   repeated AssertionSpec assertions = 20;
+  // 保留策略两键（014-data-05 方案 D6，字段号因 04 占用 20 后移至 21/22）：缺省 0 =
+  // 永久保留（retention_days）/ 全保留（version_keep_last），即维持软删先行的现状。
+  // frog 对保留策略点头前，带非 0 值登记直接拒绝（RETENTION_POLICY_INVALID）；
+  // 点头后才接受正整数，物理清理随之才可能发生。
+  int32 retention_days = 21;
+  int32 version_keep_last = 22;
 }
 
 message RegisterDataObjectResponse {

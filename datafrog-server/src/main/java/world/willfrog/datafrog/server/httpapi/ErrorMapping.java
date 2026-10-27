@@ -31,6 +31,7 @@ public class ErrorMapping {
             case INVALID_CONVENTION -> new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "CONVENTION_VIOLATION", detail);
             case DEFINITION_ALREADY_EXISTS -> new ApiException(HttpStatus.CONFLICT, "DEFINITION_ALREADY_EXISTS", detail);
             case TABLES_NOT_READY -> new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "TABLES_NOT_READY", detail);
+            case RETENTION_POLICY_INVALID -> new ApiException(HttpStatus.BAD_REQUEST, "RETENTION_POLICY_INVALID", detail);
             case INVALID_ARGUMENT -> new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", detail);
             case INTERNAL -> internal();
             case OK -> {

@@ -26,6 +26,11 @@ public record DataObjectRow(
         String compression,
         String status,
         long createdAt,
-        long updatedAt
+        long updatedAt,
+        // 保留策略两键（014-data-05 方案 D6）：null = 未设置。
+        Integer retentionDays,
+        Integer versionKeepLast,
+        // 软删时间戳（014-data-05 方案 D6 增列；「软删之后多少天物理清理」的到期计算需要）。
+        Long deletedAt
 ) {
 }

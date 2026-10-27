@@ -36,6 +36,18 @@ public class DatafrogRuntimeConfig {
     /** embedding 向量维度，须与集合维度一致。 */
     private Integer embeddingDim;
 
+    /** 导出触发限额：每用户每日次数上限（014-data-05 方案 D8，热配置起始值，默认 50）。 */
+    private Integer exportDailyLimitPerUser;
+
+    /** 导出触发限额：同一对象重复导出的最小间隔秒数（014-data-05 方案 D8，起始值，默认 60）。 */
+    private Integer exportReexportCooldownSeconds;
+
+    /** 清理执行体的周期间隔毫秒（014-data-05 方案 D6，默认六小时）。 */
+    private Long maintenanceSweepIntervalMs;
+
+    /** 维护端点的管理员用户 id 清单（逗号分隔；014-data-05 方案 D10，默认空=全部拒绝）。 */
+    private String maintenanceAdminUserIds;
+
     public String getAuthPassthroughUserId() {
         return authPassthroughUserId;
     }
@@ -98,5 +110,37 @@ public class DatafrogRuntimeConfig {
 
     public void setEmbeddingDim(Integer embeddingDim) {
         this.embeddingDim = embeddingDim;
+    }
+
+    public Integer getExportDailyLimitPerUser() {
+        return exportDailyLimitPerUser;
+    }
+
+    public void setExportDailyLimitPerUser(Integer exportDailyLimitPerUser) {
+        this.exportDailyLimitPerUser = exportDailyLimitPerUser;
+    }
+
+    public Integer getExportReexportCooldownSeconds() {
+        return exportReexportCooldownSeconds;
+    }
+
+    public void setExportReexportCooldownSeconds(Integer exportReexportCooldownSeconds) {
+        this.exportReexportCooldownSeconds = exportReexportCooldownSeconds;
+    }
+
+    public Long getMaintenanceSweepIntervalMs() {
+        return maintenanceSweepIntervalMs;
+    }
+
+    public void setMaintenanceSweepIntervalMs(Long maintenanceSweepIntervalMs) {
+        this.maintenanceSweepIntervalMs = maintenanceSweepIntervalMs;
+    }
+
+    public String getMaintenanceAdminUserIds() {
+        return maintenanceAdminUserIds;
+    }
+
+    public void setMaintenanceAdminUserIds(String maintenanceAdminUserIds) {
+        this.maintenanceAdminUserIds = maintenanceAdminUserIds;
     }
 }

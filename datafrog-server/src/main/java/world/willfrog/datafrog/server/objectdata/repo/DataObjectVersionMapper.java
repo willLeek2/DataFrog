@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.util.List;
+
 /**
  * 数据对象版本行。数据覆盖三件（row_count、coverage_end、content_checksum）的唯一更新入口是
  * {@link #advanceWatermark}，追加 part 后调用：三件一起推进，同时把新 part 的 sha256
@@ -53,7 +55,8 @@ public interface DataObjectVersionMapper {
                 coverage_end AS "coverageEnd", content_checksum AS "contentChecksum",
                 continuous_complete_date AS "continuousCompleteDate",
                 has_gap_after_watermark AS "hasGapAfterWatermark",
-                status AS "status", created_at AS "createdAt", watermark_updated_at AS "watermarkUpdatedAt"
+                status AS "status", created_at AS "createdAt", watermark_updated_at AS "watermarkUpdatedAt",
+                content_purged_at AS "contentPurgedAt"
             FROM datafrog_object_version WHERE object_id = #{objectId} AND version = #{version}
             """)
     DataObjectVersionRow get(@Param("objectId") String objectId, @Param("version") int version);
@@ -66,15 +69,35 @@ public interface DataObjectVersionMapper {
                 coverage_end AS "coverageEnd", content_checksum AS "contentChecksum",
                 continuous_complete_date AS "continuousCompleteDate",
                 has_gap_after_watermark AS "hasGapAfterWatermark",
-                status AS "status", created_at AS "createdAt", watermark_updated_at AS "watermarkUpdatedAt"
+                status AS "status", created_at AS "createdAt", watermark_updated_at AS "watermarkUpdatedAt",
+                content_purged_at AS "contentPurgedAt"
             FROM datafrog_object_version
             WHERE object_id = #{objectId} AND status = 'ACTIVE'
             """)
     DataObjectVersionRow getActive(@Param("objectId") String objectId);
 
+    /** 某对象的全部版本行（014-data-05 清理执行体的版本级保留扫描用）。 */
+    @Select("""
+            SELECT object_id AS "objectId", version AS "version", version_note AS "versionNote",
+                prev_version AS "prevVersion", coverage_start AS "coverageStart",
+                content_path AS "contentPath", part_count AS "partCount",
+                part_checksums::text AS "partChecksumsJson", row_count AS "rowCount",
+                coverage_end AS "coverageEnd", content_checksum AS "contentChecksum",
+                status AS "status", created_at AS "createdAt", watermark_updated_at AS "watermarkUpdatedAt",
+                content_purged_at AS "contentPurgedAt"
+            FROM datafrog_object_version WHERE object_id = #{objectId} ORDER BY version DESC
+            """)
+    List<DataObjectVersionRow> listByObject(@Param("objectId") String objectId);
+
     /** 升版封存：旧版本行置 SUPERSEDED；封存后 advanceWatermark 的 WHERE 条件使其不再可写。 */
     @Update("UPDATE datafrog_object_version SET status = 'SUPERSEDED' WHERE object_id = #{objectId} AND version = #{version}")
     int supersede(@Param("objectId") String objectId, @Param("version") int version);
+
+    /** 内容物理清理标记（014-data-05 方案 D6）：只删内容文件不删行，行上留「内容已清」档案事实。 */
+    @Update("UPDATE datafrog_object_version SET content_purged_at = #{now} "
+            + "WHERE object_id = #{objectId} AND version = #{version} AND content_purged_at IS NULL")
+    int markContentPurged(@Param("objectId") String objectId, @Param("version") int version,
+                          @Param("now") long now);
 
     @Select("SELECT to_regclass('datafrog_object_version') IS NOT NULL")
     boolean tableExists();

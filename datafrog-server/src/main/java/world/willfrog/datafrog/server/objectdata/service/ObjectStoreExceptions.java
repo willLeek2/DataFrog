@@ -70,4 +70,11 @@ public final class ObjectStoreExceptions {
             super(message);
         }
     }
+
+    /** 保留策略值非法（非正整数），或保留策略尚未启用（frog 点头前带非空值登记）——014-data-05 方案 D6。 */
+    public static final class RetentionPolicyInvalidException extends RuntimeException {
+        public RetentionPolicyInvalidException(String message) {
+            super(message);
+        }
+    }
 }

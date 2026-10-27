@@ -108,7 +108,9 @@ public class DataObjectServiceImpl extends DubboDataObjectServiceTriple.DataObje
                     request.getAssertionsList().stream()
                             .map(a -> new world.willfrog.datafrog.server.objectdata.domain.AssertionSpec(
                                     a.getType(), a.getDateValue(), a.getCountValue(), a.getDependsOnList()))
-                            .toList());
+                            .toList(),
+                    intZeroToNull(request.getRetentionDays()),
+                    intZeroToNull(request.getVersionKeepLast()));
             return RegisterDataObjectResponse.newBuilder()
                     .setResult(ok())
                     .setCard(toCard(registry.register(cmd)))
@@ -331,6 +333,11 @@ public class DataObjectServiceImpl extends DubboDataObjectServiceTriple.DataObje
         return ResultInfo.newBuilder().setOk(true).setCode(ErrorCode.OK).build();
     }
 
+    /** proto int32 无 null 形态：0 表示未设置（映射回 null），非 0 原样透传（负数会被服务层拒绝）。 */
+    private static Integer intZeroToNull(int value) {
+        return value == 0 ? null : value;
+    }
+
     private static ResultInfo error(Exception e) {
         ErrorCode code;
         if (e instanceof ObjectStoreExceptions.SemanticRefNotFoundException) {
@@ -347,6 +354,8 @@ public class DataObjectServiceImpl extends DubboDataObjectServiceTriple.DataObje
             code = ErrorCode.DUPLICATE_VERSION;
         } else if (e instanceof ObjectStoreExceptions.TablesNotReadyException) {
             code = ErrorCode.TABLES_NOT_READY;
+        } else if (e instanceof ObjectStoreExceptions.RetentionPolicyInvalidException) {
+            code = ErrorCode.RETENTION_POLICY_INVALID;
         } else if (e instanceof ObjectStoreExceptions.InvalidArgumentException
                 || e instanceof IllegalArgumentException) {
             code = ErrorCode.INVALID_ARGUMENT;
@@ -381,7 +390,10 @@ public class DataObjectServiceImpl extends DubboDataObjectServiceTriple.DataObje
                 .setCoverageStart(view.coverageStart() == null ? "" : view.coverageStart())
                 .setCoverageEnd(view.coverageEnd() == null ? "" : view.coverageEnd())
                 .setContentChecksum(view.contentChecksum() == null ? "" : view.contentChecksum())
-                .setAssertionStatus(statusValue(view.assertionStatus()));
+                .setAssertionStatus(statusValue(view.assertionStatus()))
+                // 保留策略两键（014-data-05 方案 D6）：proto int32 无 null 形态，0 = 未设置。
+                .setRetentionDays(o.retentionDays() == null ? 0 : o.retentionDays())
+                .setVersionKeepLast(o.versionKeepLast() == null ? 0 : o.versionKeepLast());
         for (var ref : o.semanticRefs()) {
             b.addSemanticRefs(SemanticRef.newBuilder().setName(ref.name()).setVersion(ref.version()));
         }
