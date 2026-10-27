@@ -91,3 +91,8 @@ datafrog:
         - data-id: ${DATAFROG_CONFIG_NACOS_RUNTIME_DATA_ID:datafrog-runtime.json}
           group: ${DATAFROG_CONFIG_NACOS_GROUP:datafrog-config}
           target-file: ${DATAFROG_RUNTIME_CONFIG_FILE:}
+  # 运行时热配置的写盘文件路径（加载器读取侧；与上方订阅的 target-file 用同一个环境变量，
+  # 两边必须一致）。部署环境注入实际路径（如 /app/config-dynamic/datafrog-runtime.local.json）；
+  # 为空时桥跳过该订阅、加载器找不到文件，全部回退环境变量默认值。
+  runtime:
+    config-file: ${DATAFROG_RUNTIME_CONFIG_FILE:}
