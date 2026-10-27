@@ -1,5 +1,7 @@
 package world.willfrog.datafrog.server.objectdata.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -11,6 +13,7 @@ import world.willfrog.datafrog.server.objectdata.repo.DataObjectMapper;
 import world.willfrog.datafrog.server.objectdata.repo.DataObjectRow;
 import world.willfrog.datafrog.server.objectdata.repo.DataObjectVersionMapper;
 import world.willfrog.datafrog.server.objectdata.repo.DataObjectVersionRow;
+import world.willfrog.datafrog.server.semanticindex.SemanticIndexService;
 
 import java.security.SecureRandom;
 import java.util.ArrayList;
@@ -58,6 +61,7 @@ public class DataObjectRegistryService {
     }
 
     private static final SecureRandom RANDOM = new SecureRandom();
+    private static final Logger log = LoggerFactory.getLogger(DataObjectRegistryService.class);
 
     private final DataObjectMapper objectMapper;
     private final DataObjectVersionMapper versionMapper;
@@ -65,11 +69,13 @@ public class DataObjectRegistryService {
     private final SemanticDefinitionService definitionService;
     private final ContentStorageService contentStore;
     private final ConventionValidator validator;
+    private final SemanticIndexService semanticIndex;
     private final TransactionTemplate tx;
 
     public DataObjectRegistryService(DataObjectMapper objectMapper, DataObjectVersionMapper versionMapper,
                                      CatalogRecordMapper catalogMapper, SemanticDefinitionService definitionService,
                                      ContentStorageService contentStore, ConventionValidator validator,
+                                     SemanticIndexService semanticIndex,
                                      PlatformTransactionManager transactionManager) {
         this.objectMapper = objectMapper;
         this.versionMapper = versionMapper;
@@ -77,6 +83,7 @@ public class DataObjectRegistryService {
         this.definitionService = definitionService;
         this.contentStore = contentStore;
         this.validator = validator;
+        this.semanticIndex = semanticIndex;
         this.tx = new TransactionTemplate(transactionManager);
     }
 
@@ -109,6 +116,8 @@ public class DataObjectRegistryService {
             contentStore.deleteVersionDirQuietly(contentPath);
             throw e;
         }
+        // 语义索引写入点 REGISTERED（014-data-06 方案 D6）：元数据事务成功后才写向量
+        upsertIndexQuietly(id, cmd.name(), cmd.description(), cmd.owner(), cmd.visibility());
         return get(id);
     }
 
@@ -137,6 +146,8 @@ public class DataObjectRegistryService {
             contentStore.deletePartQuietly(active.contentPath(), part.fileName());
             throw e;
         }
+        // 追加不写语义索引（014-data-06 方案 D6）：APPENDED 只动数据覆盖日期不动描述，
+        // 重写向量是浪费
         return get(objectId);
     }
 
@@ -171,6 +182,9 @@ public class DataObjectRegistryService {
             contentStore.deleteVersionDirQuietly(contentPath);
             throw e;
         }
+        // 语义索引写入点 MODIFIED（014-data-06 方案 D6）：当前升版不改名字与描述，
+        // 本次写入是同内容幂等刷新；挂在这里是为了将来出现改描述的升版路径时不用补挂点
+        upsertIndexQuietly(objectId, object.name(), object.description(), object.owner(), object.visibility());
         return get(objectId);
     }
 
@@ -181,6 +195,8 @@ public class DataObjectRegistryService {
             objectMapper.markDeleted(objectId, now);
             catalogMapper.insert(objectId, CatalogAction.DELETED.name(), "system", "软删（保留策略任务前不物理删）", now);
         });
+        // 删除后的索引清理由 014-data-05 的删除保留策略经 SemanticIndexService.deleteByObjectId
+        // 统一接走，本条删除路径不直接调（方案 D6）
     }
 
     public CardView get(String objectId) {
@@ -224,6 +240,20 @@ public class DataObjectRegistryService {
             actions.add(record.action() + " " + record.summary() + " @" + record.createdAt());
         }
         return actions;
+    }
+
+    /**
+     * 语义索引写入的静默封装：元数据落库是权威事实，索引可以按台账重建，
+     * 所以向量写入失败只记 error 日志留重建线索，不推翻已成功的登记或升版。
+     */
+    private void upsertIndexQuietly(String objectId, String name, String description,
+                                    String owner, String visibility) {
+        try {
+            semanticIndex.upsert(objectId, name, description, owner, visibility);
+        } catch (Exception e) {
+            log.error("语义索引写入失败（元数据已落库不受影响，可按台账重建）objectId={}: {}",
+                    objectId, e.getMessage());
+        }
     }
 
     private DataObjectRow requireVisible(String objectId) {

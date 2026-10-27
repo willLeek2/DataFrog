@@ -83,6 +83,14 @@
             <artifactId>client</artifactId>
             <version>1.16.0</version>
         </dependency>
+        <!-- Dubbo 的依赖管理把 io.grpc 系列统一管成 runtime 域，QdrantGrpcClient 的公开签名
+             引用 io.grpc.ManagedChannel，编译期需要它出现在 compile 域——显式声明拉回，
+             版本与 Dubbo 管理值对齐。与主仓库 externalInfoService 的处理方式相同。 -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-api</artifactId>
+            <version>1.68.2</version>
+        </dependency>
         <!-- 014-data-06：热配置桥（server.config 包复制自主仓库 common 的 NacosConfigBridge）。
              版本与主仓库 common 模块保持一致。 -->
         <dependency>
