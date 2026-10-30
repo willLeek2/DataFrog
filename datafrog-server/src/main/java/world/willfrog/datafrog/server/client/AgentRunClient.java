@@ -55,7 +55,10 @@ public class AgentRunClient {
      * run 行的 lane_tag 取自该附件，直连不经过注册中心路由不会自动携带，漏带会使 agent 侧
      * 服务所有权租约的 scope 匹配在 lane_tag 一项永不命中、运行悬死至规格超时（05 phase 2
      * 诊断轮实证，wang 裁定修法 A「谁直连谁带 tag」，与 04 驱动器 --lane-tag 同一模式）。
-     * 配置为空=不设附件=现状行为；主环境走 Nacos 路由由过滤器自动携带，不配置本键。</p>
+     * 附件写在 client 附件上下文（与主仓库消费方 LaneConsumerHopFilter 同一 API）：消费方
+     * 过滤器每次都把 client 附件抄进本次调用，server 附件属于入站请求、不保证外带（bob 审查
+     * 021b7de 指出）。调用后恢复原值，避免污染线程上的其他调用。配置为空=不设附件=现状行为；
+     * 主环境走 Nacos 路由由过滤器自动携带，不配置本键。</p>
      */
     public AgentRunMessage createRun(String userId, String message, String contextJson, String idempotencyKey,
                                      String stageConfigJson) {
@@ -72,11 +75,16 @@ public class AgentRunClient {
         if (laneTag == null || laneTag.isBlank()) {
             return agentDubboService.createRun(builder.build());
         }
-        RpcContext.getServerAttachment().setAttachment(LANE_TAG_ATTACHMENT_KEY, laneTag);
+        String previousClientTag = RpcContext.getClientAttachment().getAttachment(LANE_TAG_ATTACHMENT_KEY);
+        RpcContext.getClientAttachment().setAttachment(LANE_TAG_ATTACHMENT_KEY, laneTag);
         try {
             return agentDubboService.createRun(builder.build());
         } finally {
-            RpcContext.getServerAttachment().removeAttachment(LANE_TAG_ATTACHMENT_KEY);
+            if (previousClientTag != null) {
+                RpcContext.getClientAttachment().setAttachment(LANE_TAG_ATTACHMENT_KEY, previousClientTag);
+            } else {
+                RpcContext.getClientAttachment().removeAttachment(LANE_TAG_ATTACHMENT_KEY);
+            }
         }
     }
 
