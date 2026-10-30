@@ -46,6 +46,9 @@ public class ModificationRegistrationService {
     static final String ERR_PRODUCT_INVALID = "MODIFICATION_PRODUCT_INVALID";
     static final String ERR_REGISTRATION_FAILED = "MODIFICATION_REGISTRATION_FAILED";
 
+    /** 运行交付产物的附件类型（主仓库收割通道 014-new-03）：清单里只有这类条目算运行产出。 */
+    static final String ARTIFACT_TYPE_RUN_OUTPUT = "run_output";
+
     private final ModificationTaskMapper taskMapper;
     private final AgentRunClient agentRunClient;
     private final DataObjectRegistryService registryService;
@@ -128,12 +131,18 @@ public class ModificationRegistrationService {
 
     /**
      * 取回运行产出的完整 CSV。产物文件经 06 交付的附件通道取，不读 GetResult 的 answer
-     * 文本（文本通道不保证完整）。CSV 附件恰有一个才登记：零个说明运行没按规格产出文件，
-     * 多个说明无法确定哪份是登记对象——都如实失败，不猜。
+     * 文本（文本通道不保证完整）。清单先按附件类型过滤，只认 run_output（014-new-03 M7）：
+     * 挂载进运行环境的数据集文件（dataset_*）与注入的 python 脚本（python_script）也在
+     * 同一份清单里，它们不是运行产出，不参与登记对象的挑选。过滤后 CSV 附件恰有一个才
+     * 登记：零个说明运行没按规格产出文件，多个说明无法确定哪份是登记对象——都如实失败，不猜。
      */
     private byte[] fetchRunCsv(ModificationTaskEntity task) {
         List<AgentArtifactMessage> csvArtifacts = new ArrayList<>();
         for (AgentArtifactMessage artifact : agentRunClient.listRunArtifacts(task.getUserId(), task.getRunId())) {
+            String type = artifact.getType() == null ? "" : artifact.getType();
+            if (!ARTIFACT_TYPE_RUN_OUTPUT.equals(type)) {
+                continue;
+            }
             String contentType = artifact.getContentType() == null ? "" : artifact.getContentType();
             String name = artifact.getName() == null ? "" : artifact.getName();
             if (contentType.toLowerCase().contains("csv") || name.toLowerCase().endsWith(".csv")) {

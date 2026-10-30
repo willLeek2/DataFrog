@@ -250,14 +250,19 @@ public class ModificationTaskServiceImpl {
         // 注入（02 的三要素键 + 05 的三键一起进去）。运行指令按 02 的自包含先例拼装：
         // 主仓库不把 contextJson 的其他键表面化给模型（05 泳道 phase 2 首跑实证，模型
         // 只见 instruction 文本），基准对象身份由平台在指令文本里给模型一份可读副本，
-        // specJson 契约键不变。
+        // specJson 契约键不变。指令尾部并给交付文件去向一句（014-new-03 M8，措辞已定）：
+        // 产物要落进 AF_TASK_ARTIFACT_DIR 收割目录成 run_output 附件，不是只打印在回答里，
+        // 与登记段 fetchRunCsv 只认 run_output 附件前后衔接一致。收割开关 createRun 传 true
+        //（014-new-03 M6）：修改任务的交付产物靠该通道取回登记，02 生成任务不共用此开关。
         String runInstruction = instruction
                 + "\n\n（平台按任务规格注入）基准数据对象：" + baseObjectId
                 + "（基准版本 " + baseVersion + "）。请用 executePython 挂载该对象编号读取数据，"
-                + "按上述要求处理后产出 CSV 附件。";
+                + "按上述要求处理后产出 CSV 附件。"
+                + "交付文件写入环境变量 AF_TASK_ARTIFACT_DIR 指向的任务产物目录（文件名如 result.csv），"
+                + "不要只把内容打印在回答里。";
         try {
             AgentRunMessage run = agentRunClient.createRun(userId, runInstruction, request.specJson(),
-                    task.getId(), stageConfigJson);
+                    task.getId(), stageConfigJson, true);
             taskMapper.updateRunning(task.getId(), ModificationTaskStateMachine.RUNNING, run.getId());
             return new CreateModificationTaskResponse(task.getId(), ModificationTaskStateMachine.RUNNING,
                     false, null, null);

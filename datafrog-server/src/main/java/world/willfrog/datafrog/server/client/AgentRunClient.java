@@ -50,6 +50,10 @@ public class AgentRunClient {
      * stageConfigJson 非空时写入 createRun 请求（主仓库契约字段 11，注释写明「各阶段 LLM 配置」），
      * 服务端合并规则是逐字段以运行自带值优先于本地默认，用于按任务指定便宜模型
      * （frog 2026-10-26：测试尽量用便宜模型）。
+     * generateArtifacts=true 时置 generate_artifacts（主仓库契约字段 12，014-new-03 收割通道）：
+     * 请求服务端把运行的交付文件收成交付产物附件（type=run_output）。开关只有修改任务受理
+     * 设 true（走下面的六参重载）；02 生成任务走原五参方法，不设该字段，维持现状行为
+     * （组长裁定：收割开关只给修改任务开）。
      *
      * <p>泳道直连场景在调用前携带 dubbo.tag 附件（热配置 agentLaneTag，值=agent 侧泳道名）：
      * run 行的 lane_tag 取自该附件，直连不经过注册中心路由不会自动携带，漏带会使 agent 侧
@@ -62,6 +66,12 @@ public class AgentRunClient {
      */
     public AgentRunMessage createRun(String userId, String message, String contextJson, String idempotencyKey,
                                      String stageConfigJson) {
+        return createRun(userId, message, contextJson, idempotencyKey, stageConfigJson, false);
+    }
+
+    /** 六参重载：仅修改任务受理调用并传 true（014-new-03 M6），其余调用方一律走五参入口。 */
+    public AgentRunMessage createRun(String userId, String message, String contextJson, String idempotencyKey,
+                                     String stageConfigJson, boolean generateArtifacts) {
         CreateAgentRunRequest.Builder builder = CreateAgentRunRequest.newBuilder()
                 .setUserId(userId)
                 .setMessage(message)
@@ -69,6 +79,9 @@ public class AgentRunClient {
                 .setIdempotencyKey(idempotencyKey);
         if (stageConfigJson != null && !stageConfigJson.isBlank()) {
             builder.setStageConfigJson(stageConfigJson);
+        }
+        if (generateArtifacts) {
+            builder.setGenerateArtifacts(true);
         }
         DatafrogRuntimeConfig cfg = configLoader.current().orElse(null);
         String laneTag = cfg == null ? null : cfg.getAgentLaneTag();
