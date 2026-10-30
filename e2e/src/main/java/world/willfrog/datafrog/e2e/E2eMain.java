@@ -448,7 +448,8 @@ public final class E2eMain {
             return;
         }
         HttpResult ok1 = httpPost(cfg, "/modification-tasks",
-                "{" + specJson("把收盘价整体上浮百分之十，输出同列结构 CSV", cfg.s10Object(), null, "e2e05 修改验证")
+                "{" + specJson("把收盘价整体上浮百分之十，输出同列结构 CSV", cfg.s10Object(), null, "e2e05 修改验证",
+                                "deepseek/deepseek-v4.1-flash")
                         + ",\"clientRequestId\":\"" + clientReqId + "\"}");
         JsonNode ok1body = json.readTree(ok1.body);
         String taskId = ok1body.path("taskId").asText("");
@@ -457,7 +458,8 @@ public final class E2eMain {
                 "status=" + ok1.status + " body=" + clip(ok1.body));
 
         HttpResult dup = httpPost(cfg, "/modification-tasks",
-                "{" + specJson("把收盘价整体上浮百分之十，输出同列结构 CSV", cfg.s10Object(), null, "e2e05 修改验证")
+                "{" + specJson("把收盘价整体上浮百分之十，输出同列结构 CSV", cfg.s10Object(), null, "e2e05 修改验证",
+                                "deepseek/deepseek-v4.1-flash")
                         + ",\"clientRequestId\":\"" + clientReqId + "\"}");
         JsonNode dupBody = json.readTree(dup.body);
         check("p2.同 clientRequestId 重发 deduplicated=true 且 taskId 一致",
@@ -475,14 +477,22 @@ public final class E2eMain {
                 .append("（run 段驱动器接管后续断言）\n");
     }
 
-    /** 组装 specJson 字符串值（base/version/note 任一可为 null 表示不写该键；
+    /** 组装 specJson 字符串值（base/version/note/model 任一可为 null 表示不写该键；
      *  timeout_seconds 是 02 契约必填键，受理校验 [60,86400]，固定 600——驱动器
      *  接管的 --timeout-seconds 900 比它宽，先按规格超时再按驱动器超时）。 */
     private static String specJson(String instruction, String baseObjectId, Integer baseVersion,
                                    String versionNote) {
+        return specJson(instruction, baseObjectId, baseVersion, versionNote, null);
+    }
+
+    private static String specJson(String instruction, String baseObjectId, Integer baseVersion,
+                                   String versionNote, String model) {
         StringBuilder sb = new StringBuilder("\"specJson\":\"{");
         sb.append("\\\"instruction\\\":\\\"").append(instruction).append("\\\"");
         sb.append(",\\\"timeout_seconds\\\":600");
+        if (model != null) {
+            sb.append(",\\\"model\\\":\\\"").append(model).append("\\\"");
+        }
         if (baseObjectId != null) {
             sb.append(",\\\"base_object_id\\\":\\\"").append(baseObjectId).append("\\\"");
         }
