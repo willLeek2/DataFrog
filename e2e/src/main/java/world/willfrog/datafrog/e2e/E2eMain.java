@@ -418,26 +418,28 @@ public final class E2eMain {
         section("phase2 受理段（run 段等驱动器）");
         String clientReqId = "e2e05-" + stamp;
 
-        // 无效规格：缺 base_object_id
+        // 无效规格：缺 base_object_id。受理校验落 400，problem 码=INVALID_ARGUMENT
+        // （INVALID_SPEC 是服务内部码，HTTP 层经 ErrorMapping 落成 INVALID_ARGUMENT，原文只在 detail）
         HttpResult bad1 = httpPost(cfg, "/modification-tasks",
                 "{" + specJson("把对象改好", null, null, "例行修改") + ",\"clientRequestId\":\"" + clientReqId + "-bad1\"}");
-        check("p2.缺 base_object_id 400 INVALID_SPEC",
-                bad1.status == 400 && bad1.body.contains("INVALID_SPEC"),
+        check("p2.缺 base_object_id 400 INVALID_ARGUMENT（detail 指 base_object_id）",
+                bad1.status == 400 && bad1.body.contains("INVALID_ARGUMENT") && bad1.body.contains("base_object_id"),
                 "status=" + bad1.status + " body=" + clip(bad1.body));
 
-        // 缺 version_note
+        // 缺 version_note（同上映射）
         HttpResult bad2 = httpPost(cfg, "/modification-tasks",
                 "{" + specJson("把对象改好", "ds_any", null, null) + ",\"clientRequestId\":\"" + clientReqId + "-bad2\"}");
-        check("p2.缺 version_note 400 INVALID_SPEC",
-                bad2.status == 400 && bad2.body.contains("INVALID_SPEC"),
+        check("p2.缺 version_note 400 INVALID_ARGUMENT（detail 指 version_note）",
+                bad2.status == 400 && bad2.body.contains("INVALID_ARGUMENT") && bad2.body.contains("version_note"),
                 "status=" + bad2.status + " body=" + clip(bad2.body));
 
-        // base_version 给旧版本：受理即拒（九决定之一）。需要一个已升过版/可先登记再升版的对象：
-        // 这里只对不存在对象给显式版本——校验顺序是对象存在性在前，断言用 MODIFICATION_TARGET_NOT_FOUND
+        // base_version 给旧版本：受理即拒（九决定之一）。这里对不存在对象给显式版本——
+        // 校验顺序是对象存在性在前（404 + MODIFICATION_TARGET_NOT_FOUND，ErrorMapping 对 05 新码
+        // 保留原码作 problem 码），base_version 须等当前版本的分支走不到
         HttpResult bad3 = httpPost(cfg, "/modification-tasks",
                 "{" + specJson("把对象改好", "ds_nosuch00", 1, "例行修改") + ",\"clientRequestId\":\"" + clientReqId + "-bad3\"}");
-        check("p2.基准对象不存在 400 MODIFICATION_TARGET_NOT_FOUND",
-                bad3.status == 400 && bad3.body.contains("MODIFICATION_TARGET_NOT_FOUND"),
+        check("p2.基准对象不存在 404 MODIFICATION_TARGET_NOT_FOUND",
+                bad3.status == 404 && bad3.body.contains("MODIFICATION_TARGET_NOT_FOUND"),
                 "status=" + bad3.status + " body=" + clip(bad3.body));
 
         // 受理成功与幂等：需要 --s10-object（phase 1 登记的 E 对象）作基准
@@ -473,11 +475,14 @@ public final class E2eMain {
                 .append("（run 段驱动器接管后续断言）\n");
     }
 
-    /** 组装 specJson 字符串值（base/version/note 任一可为 null 表示不写该键）。 */
+    /** 组装 specJson 字符串值（base/version/note 任一可为 null 表示不写该键；
+     *  timeout_seconds 是 02 契约必填键，受理校验 [60,86400]，固定 600——驱动器
+     *  接管的 --timeout-seconds 900 比它宽，先按规格超时再按驱动器超时）。 */
     private static String specJson(String instruction, String baseObjectId, Integer baseVersion,
                                    String versionNote) {
         StringBuilder sb = new StringBuilder("\"specJson\":\"{");
         sb.append("\\\"instruction\\\":\\\"").append(instruction).append("\\\"");
+        sb.append(",\\\"timeout_seconds\\\":600");
         if (baseObjectId != null) {
             sb.append(",\\\"base_object_id\\\":\\\"").append(baseObjectId).append("\\\"");
         }
