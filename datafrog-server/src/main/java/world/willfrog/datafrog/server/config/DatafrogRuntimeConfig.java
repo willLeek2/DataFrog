@@ -48,6 +48,16 @@ public class DatafrogRuntimeConfig {
     /** 维护端点的管理员用户 id 清单（逗号分隔；014-data-05 方案 D10，默认空=全部拒绝）。 */
     private String maintenanceAdminUserIds;
 
+    /**
+     * 调用 Agent 运行体系时携带的 dubbo.tag（=agent 侧泳道名，如 lane-014data05m）。
+     * 泳道直连场景专用：run 行的 lane_tag 取自请求的 dubbo.tag 附件，直连不经过注册中心
+     * 路由就不会自动携带，漏带会使 agent 侧租约续期的 scope 匹配（lane_tag 一项）永不命中，
+     * 运行在所有权丢失后悬死至规格超时（05 phase 2 诊断轮实证）。主环境走 Nacos 路由、
+     * 过滤器自动带 tag，不配置本键（空=不设附件=现状行为，向后兼容）。
+     * 注意值是 agent 泳道名，不是 DataFrog 自身的泳道名（两者不同名）。
+     */
+    private String agentLaneTag;
+
     public String getAuthPassthroughUserId() {
         return authPassthroughUserId;
     }
@@ -142,5 +152,13 @@ public class DatafrogRuntimeConfig {
 
     public void setMaintenanceAdminUserIds(String maintenanceAdminUserIds) {
         this.maintenanceAdminUserIds = maintenanceAdminUserIds;
+    }
+
+    public String getAgentLaneTag() {
+        return agentLaneTag;
+    }
+
+    public void setAgentLaneTag(String agentLaneTag) {
+        this.agentLaneTag = agentLaneTag;
     }
 }
