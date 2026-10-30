@@ -247,9 +247,16 @@ public class ModificationTaskServiceImpl {
         creditClient.debit(userId, PRECHARGE_CREDITS, task.getId());
 
         // 拉起受控运行；幂等键填任务编号，防止重试造成重复运行。规格整体作为 contextJson
-        // 注入（02 的三要素键 + 05 的三键一起进去，主仓库按约定键读）。
+        // 注入（02 的三要素键 + 05 的三键一起进去）。运行指令按 02 的自包含先例拼装：
+        // 主仓库不把 contextJson 的其他键表面化给模型（05 泳道 phase 2 首跑实证，模型
+        // 只见 instruction 文本），基准对象身份由平台在指令文本里给模型一份可读副本，
+        // specJson 契约键不变。
+        String runInstruction = instruction
+                + "\n\n（平台按任务规格注入）基准数据对象：" + baseObjectId
+                + "（基准版本 " + baseVersion + "）。请用 executePython 挂载该对象编号读取数据，"
+                + "按上述要求处理后产出 CSV 附件。";
         try {
-            AgentRunMessage run = agentRunClient.createRun(userId, instruction, request.specJson(),
+            AgentRunMessage run = agentRunClient.createRun(userId, runInstruction, request.specJson(),
                     task.getId(), stageConfigJson);
             taskMapper.updateRunning(task.getId(), ModificationTaskStateMachine.RUNNING, run.getId());
             return new CreateModificationTaskResponse(task.getId(), ModificationTaskStateMachine.RUNNING,
